@@ -2,15 +2,14 @@
 # Cloud Mac build for Trace's iOS app (Capacitor).
 # Runs on Codemagic's macOS machines — you never need a Mac.
 #
-# Prerequisites (done via the Codemagic UI):
+# Prerequisites (Codemagic UI):
 #   - Add your App Store Connect API key as an integration named
 #     exactly "TRACE_APP_STORE_KEY".
+#   - IMPORTANT: that key must have **Admin** access, because Apple
+#     only lets Admin keys create the signing certificate.
 #
-# The `ios_signing` block below is Codemagic MANAGED signing: it
-# creates the distribution certificate + provisioning profile for
-# bundle id app.trace.gpx, KEEPS the certificate's private key in your
-# Codemagic account (so it's reused every build), installs them in the
-# keychain, and `xcode-project use-profiles` applies them to the project.
+# This recipe creates the distribution certificate + provisioning
+# profile on the first run, signs the app, and uploads to TestFlight.
 # Docs: https://docs.codemagic.io/yaml-code-signing/signing-ios/
 # ============================================================
 workflows:
@@ -21,15 +20,13 @@ workflows:
     integrations:
       app_store_connect: TRACE_APP_STORE_KEY
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: app.trace.gpx
       node: 20.14.0
       xcode: latest
       cocoapods: default
       vars:
         XCODE_WORKSPACE: "App.xcworkspace"
         XCODE_SCHEME: "App"
+        BUNDLE_ID: "app.trace.gpx"
     scripts:
       - name: Install web dependencies
         script: npm ci
@@ -40,8 +37,13 @@ workflows:
       - name: Install CocoaPods dependencies
         script: |
           cd ios/App && pod install
-      - name: Set up code signing settings on Xcode project
+      - name: Set up code signing (creates cert + profile on first run)
         script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
           xcode-project use-profiles
       - name: Build signed IPA
         script: |
