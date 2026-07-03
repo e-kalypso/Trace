@@ -2,20 +2,24 @@
 # Cloud Mac build for Trace's iOS app (Capacitor).
 # Runs on Codemagic's macOS machines — you never need a Mac.
 #
-# Before this works you must, in the Codemagic UI:
-#   1. Connect your Apple Developer account (App Store Connect API key).
-#   2. Set the bundle identifier to match capacitor.config.ts (app.trace.gpx,
-#      or whatever you changed it to).
-#   3. Enable "Automatic code signing".
-# Then push to your repo (or click "Start new build") to get a TestFlight build.
-# Docs: https://docs.codemagic.io/yaml-quick-start/building-a-capacitor-ios-app/
+# Prerequisites (done via the Codemagic UI):
+#   - Add your App Store Connect API key as an integration named
+#     exactly "TRACE_APP_STORE_KEY".
+# Codemagic then auto-creates the signing certificate + provisioning
+# profile for bundle id app.trace.gpx and uploads to TestFlight.
+# Docs: https://docs.codemagic.io/yaml-code-signing/signing-ios/
 # ============================================================
 workflows:
   ios-capacitor:
     name: Trace iOS (Capacitor)
     instance_type: mac_mini_m2
     max_build_duration: 60
+    integrations:
+      app_store_connect: TRACE_APP_STORE_KEY
     environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.trace.gpx
       node: 20.14.0
       xcode: latest
       cocoapods: default
@@ -23,9 +27,6 @@ workflows:
         XCODE_WORKSPACE: "ios/App/App.xcworkspace"
         XCODE_SCHEME: "App"
         BUNDLE_ID: "app.trace.gpx"
-      # groups: [appstore_credentials]   # set up in Codemagic UI
-    integrations:
-      app_store_connect: TRACE_APP_STORE_KEY # name of the key you add in Codemagic
     scripts:
       - name: Install web dependencies
         script: npm ci
@@ -33,13 +34,13 @@ workflows:
         script: |
           npm run build
           npx cap sync ios
-      - name: Install CocoaPods
+      - name: Install CocoaPods dependencies
         script: |
           cd ios/App && pod install
-      - name: Set up code signing
+      - name: Apply automatic code signing to the Xcode project
         script: |
           xcode-project use-profiles
-      - name: Build IPA
+      - name: Build signed IPA
         script: |
           xcode-project build-ipa \
             --workspace "$XCODE_WORKSPACE" \
