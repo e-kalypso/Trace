@@ -1,16 +1,12 @@
 # ============================================================
 # Cloud Mac build for Trace's iOS app (Capacitor).
-# Runs on Codemagic's macOS machines — you never need a Mac.
 #
-# Prerequisites (Codemagic UI):
-#   - Add your App Store Connect API key as an integration named
-#     exactly "TRACE_APP_STORE_KEY".
-#   - IMPORTANT: that key must have **Admin** access, because Apple
-#     only lets Admin keys create the signing certificate.
-#
-# This recipe creates the distribution certificate + provisioning
-# profile on the first run, signs the app, and uploads to TestFlight.
-# Docs: https://docs.codemagic.io/yaml-code-signing/signing-ios/
+# Manual code signing: upload BOTH files in the Codemagic UI
+# (Team settings -> Code signing identities):
+#   - iOS certificate: ios_distribution.p12  (password: TracePwd2026)
+#   - iOS provisioning profile: the .mobileprovision you create in the
+#     Apple Developer portal (App Store, bundle id app.trace.gpx).
+# The ios_signing block below then applies them — no scripts guess anything.
 # ============================================================
 workflows:
   ios-capacitor:
@@ -20,15 +16,15 @@ workflows:
     integrations:
       app_store_connect: TRACE_APP_STORE_KEY
     environment:
-      groups:
-        - signing # provides CM_CERTIFICATE (base64 .p12) + CM_CERTIFICATE_PASSWORD
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.trace.gpx
       node: 20.14.0
       xcode: latest
       cocoapods: default
       vars:
         XCODE_WORKSPACE: "App.xcworkspace"
         XCODE_SCHEME: "App"
-        BUNDLE_ID: "app.trace.gpx"
     scripts:
       - name: Install web dependencies
         script: npm ci
@@ -39,18 +35,8 @@ workflows:
       - name: Install CocoaPods dependencies
         script: |
           cd ios/App && pod install
-      - name: Set up code signing (import cert + create profile)
+      - name: Apply the uploaded signing files to the Xcode project
         script: |
-          keychain initialize
-          # Import our Apple Distribution certificate (cert + private key).
-          # The .p12 has NO password, so nothing else is needed.
-          echo "$CM_CERTIFICATE" | base64 --decode > /tmp/cert.p12
-          keychain add-certificates --certificate /tmp/cert.p12
-          keychain list-certificates | grep -i "common name" || true
-          # Create/fetch the App Store provisioning profile for the app.
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
           xcode-project use-profiles
       - name: Build signed IPA
         script: |
