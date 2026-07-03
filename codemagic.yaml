@@ -41,6 +41,8 @@ workflows:
       - name: Build signed IPA
         script: |
           cd ios/App
+          # numero de build unique exige par TestFlight a chaque envoi
+          agvtool new-version -all $BUILD_NUMBER
           xcode-project build-ipa \
             --workspace "$XCODE_WORKSPACE" \
             --scheme "$XCODE_SCHEME"
