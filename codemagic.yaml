@@ -1,0 +1,53 @@
+# ============================================================
+# Cloud Mac build for Trace's iOS app (Capacitor).
+# Runs on Codemagic's macOS machines — you never need a Mac.
+#
+# Before this works you must, in the Codemagic UI:
+#   1. Connect your Apple Developer account (App Store Connect API key).
+#   2. Set the bundle identifier to match capacitor.config.ts (app.trace.gpx,
+#      or whatever you changed it to).
+#   3. Enable "Automatic code signing".
+# Then push to your repo (or click "Start new build") to get a TestFlight build.
+# Docs: https://docs.codemagic.io/yaml-quick-start/building-a-capacitor-ios-app/
+# ============================================================
+workflows:
+  ios-capacitor:
+    name: Trace iOS (Capacitor)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      node: 20.14.0
+      xcode: latest
+      cocoapods: default
+      vars:
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
+        BUNDLE_ID: "app.trace.gpx"
+      # groups: [appstore_credentials]   # set up in Codemagic UI
+    integrations:
+      app_store_connect: TRACE_APP_STORE_KEY # name of the key you add in Codemagic
+    scripts:
+      - name: Install web dependencies
+        script: npm ci
+      - name: Build web app + sync to iOS
+        script: |
+          npm run build
+          npx cap sync ios
+      - name: Install CocoaPods
+        script: |
+          cd ios/App && pod install
+      - name: Set up code signing
+        script: |
+          xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
