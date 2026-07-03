@@ -17,9 +17,6 @@ workflows:
     integrations:
       app_store_connect: TRACE_APP_STORE_KEY
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: app.trace.gpx
       node: 20.14.0
       xcode: latest
       cocoapods: default
@@ -37,8 +34,13 @@ workflows:
       - name: Install CocoaPods dependencies
         script: |
           cd ios/App && pod install
-      - name: Apply automatic code signing to the Xcode project
+      - name: Set up code signing (creates cert + profile on first run)
         script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain add-certificates
           xcode-project use-profiles
       - name: Build signed IPA
         script: |
