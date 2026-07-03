@@ -45,6 +45,8 @@ workflows:
             --workspace "$XCODE_WORKSPACE" \
             --scheme "$XCODE_SCHEME"
     artifacts:
+      # build-ipa runs from ios/App, so the .ipa lands under ios/App/build/
+      - ios/App/build/ios/ipa/*.ipa
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
     publishing:
