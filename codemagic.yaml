@@ -5,8 +5,12 @@
 # Prerequisites (done via the Codemagic UI):
 #   - Add your App Store Connect API key as an integration named
 #     exactly "TRACE_APP_STORE_KEY".
-# Codemagic then auto-creates the signing certificate + provisioning
-# profile for bundle id app.trace.gpx and uploads to TestFlight.
+#
+# The `ios_signing` block below is Codemagic MANAGED signing: it
+# creates the distribution certificate + provisioning profile for
+# bundle id app.trace.gpx, KEEPS the certificate's private key in your
+# Codemagic account (so it's reused every build), installs them in the
+# keychain, and `xcode-project use-profiles` applies them to the project.
 # Docs: https://docs.codemagic.io/yaml-code-signing/signing-ios/
 # ============================================================
 workflows:
@@ -17,13 +21,15 @@ workflows:
     integrations:
       app_store_connect: TRACE_APP_STORE_KEY
     environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.trace.gpx
       node: 20.14.0
       xcode: latest
       cocoapods: default
       vars:
-        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_WORKSPACE: "App.xcworkspace"
         XCODE_SCHEME: "App"
-        BUNDLE_ID: "app.trace.gpx"
     scripts:
       - name: Install web dependencies
         script: npm ci
@@ -34,16 +40,12 @@ workflows:
       - name: Install CocoaPods dependencies
         script: |
           cd ios/App && pod install
-      - name: Set up code signing (creates cert + profile on first run)
+      - name: Set up code signing settings on Xcode project
         script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
-          keychain add-certificates
           xcode-project use-profiles
       - name: Build signed IPA
         script: |
+          cd ios/App
           xcode-project build-ipa \
             --workspace "$XCODE_WORKSPACE" \
             --scheme "$XCODE_SCHEME"
