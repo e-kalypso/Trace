@@ -20,6 +20,8 @@ workflows:
     integrations:
       app_store_connect: TRACE_APP_STORE_KEY
     environment:
+      groups:
+        - signing # provides CM_CERTIFICATE (base64 .p12) + CM_CERTIFICATE_PASSWORD
       node: 20.14.0
       xcode: latest
       cocoapods: default
@@ -37,15 +39,15 @@ workflows:
       - name: Install CocoaPods dependencies
         script: |
           cd ios/App && pod install
-      - name: Set up code signing (creates cert + profile on first run)
+      - name: Set up code signing (import cert + create profile)
         script: |
           keychain initialize
-          # Create a NEW distribution certificate (generates + saves its
-          # private key locally so the build can actually sign).
-          app-store-connect create-certificate \
-            --type IOS_DISTRIBUTION \
-            --save
-          keychain add-certificates
+          # Import our pre-made Apple Distribution certificate (cert + private
+          # key) that lives in the CM_CERTIFICATE env var as base64 .p12.
+          echo "$CM_CERTIFICATE" | base64 --decode > /tmp/cert.p12
+          keychain add-certificates \
+            --certificate /tmp/cert.p12 \
+            --certificate-password "$CM_CERTIFICATE_PASSWORD"
           # Create/fetch the App Store provisioning profile for the app.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
