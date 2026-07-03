@@ -40,10 +40,16 @@ workflows:
       - name: Set up code signing (creates cert + profile on first run)
         script: |
           keychain initialize
+          # Create a NEW distribution certificate (generates + saves its
+          # private key locally so the build can actually sign).
+          app-store-connect create-certificate \
+            --type IOS_DISTRIBUTION \
+            --save
+          keychain add-certificates
+          # Create/fetch the App Store provisioning profile for the app.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --create
-          keychain add-certificates
           xcode-project use-profiles
       - name: Build signed IPA
         script: |
