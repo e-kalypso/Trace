@@ -1,356 +1,289 @@
 /* ============================================================
-   MapView — MapLibre GL map with free OpenFreeMap tiles.
-   Responsibilities:
-   - View: draw the loaded track (ink) + start/finish + hover dot,
-     two-way linked with the elevation profile.
-   - Edit: draw the active route (coral), draggable anchors,
-     waypoints, and click-to-add.
+   MapView v2 — carte plein écran.
+   - Fond de carte commutable (les sources/couches custom sont
+     ré-injectées après chaque changement de style)
+   - Un trait par calque visible (le calque actif est renforcé)
+   - Position de l'utilisateur (point bleu + cap + halo)
+   - Ligne d'approche pointillée ("rejoindre…")
+   - Suivi caméra doux pendant la navigation (nord en haut,
+     recentrage throttlé : bon pour la batterie)
    ============================================================ */
 import { useEffect, useRef } from "react";
-import maplibregl, { Map as MlMap, LngLatBounds, Marker } from "maplibre-gl";
+import maplibregl, { Map as MlMap, Marker } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { FeatureCollection } from "geojson";
-import type { Track } from "../lib/gpx";
-import type { LngLat } from "../lib/routing";
-import { routeToGeoJSON, type EditRoute } from "../edit/route";
-import type { EditMode } from "../edit/useEditor";
-
-const STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
-const SRC = "trace-track";
-const EDIT_SRC = "trace-edit";
-const CMP_SRC = "trace-compare";
+import type { FeatureCollection, Feature } from "geojson";
+import type { Layer } from "../layers/useLayers";
+import type { GeoFix } from "../lib/geo";
+import { getProvider } from "../lib/providers";
 
 interface Props {
-  geojson: FeatureCollection | null;
-  compareGeojson: FeatureCollection | null; // overlay a second track
-  track: Track | null; // GPX track: start/finish markers + fit-to-bounds
-  focusTrack: Track | null; // track the scrub index indexes into (edit or GPX)
-  hoverIdx: number | null;
-  onHover: (idx: number | null) => void;
-  // edit
-  editRoute: EditRoute | null;
-  editMode: EditMode;
-  onMapClick: (p: LngLat) => void;
-  onAnchorDragEnd: (idx: number, p: LngLat) => void;
-  onAnchorClick: (idx: number) => void;
-  onWaypointClick: (id: string) => void;
-  onReady?: (map: MlMap) => void;
+  providerId: string;
+  layers: Layer[];
+  activeLayerId: string | null;
+  fix: GeoFix | null;
+  navigating: boolean;
+  /** [lng,lat][] pointillé vers le tracé / départ, ou null */
+  approach: number[][] | null;
+  onMapReady?: (map: MlMap) => void;
 }
 
-export default function MapView(props: Props) {
-  const { geojson, compareGeojson, track, focusTrack, hoverIdx, editRoute, editMode } =
-    props;
+const LAYERS_SRC = "trace-layers";
+const APPROACH_SRC = "trace-approach";
+
+function layersToFC(layers: Layer[]): FeatureCollection {
+  const features: Feature[] = [];
+  // dessine du bas vers le haut : dernier calque d'abord, actif en dernier
+  const visible = layers.filter((l) => l.visible);
+  const active = visible[0] ?? null;
+  for (const l of [...visible].reverse()) {
+    features.push({
+      type: "Feature",
+      properties: {
+        color: l.color,
+        width: l.id === active?.id ? 5 : 3,
+        opacity: l.id === active?.id ? 1 : 0.55,
+      },
+      geometry: {
+        type: "LineString",
+        coordinates: l.track.points.map((p) => [p.lng, p.lat]),
+      },
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
+
+export default function MapView(p: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
-  const readyRef = useRef(false);
+  const styleReady = useRef(false);
+  const userMarker = useRef<Marker | null>(null);
   const startMarker = useRef<Marker | null>(null);
   const finishMarker = useRef<Marker | null>(null);
-  const hoverMarker = useRef<Marker | null>(null);
-  const anchorMarkers = useRef<Marker[]>([]);
-  const waypointMarkers = useRef<Marker[]>([]);
+  const lastCamMove = useRef(0);
+  const pRef = useRef(p);
+  pRef.current = p;
 
-  // Latest values for the long-lived map event handlers.
-  const focusRef = useRef<Track | null>(focusTrack);
-  const modeRef = useRef<EditMode>(editMode);
-  const pRef = useRef(props);
-  focusRef.current = focusTrack;
-  modeRef.current = editMode;
-  pRef.current = props;
-
-  // Create the map once.
+  /* création unique */
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: STYLE_URL,
-      center: [6.86, 45.83],
-      zoom: 10,
+      style: getProvider(p.providerId).style,
+      center: [6.87, 45.92],
+      zoom: 11,
       attributionControl: { compact: true },
       dragRotate: false,
+      pitchWithRotate: false,
+      fadeDuration: 0, // moins d'animations = moins de GPU
     });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    map.touchZoomRotate.disableRotation();
 
-    map.on("load", () => {
-      readyRef.current = true;
-      map.addSource(SRC, { type: "geojson", data: emptyFC() });
-      map.addSource(CMP_SRC, { type: "geojson", data: emptyFC() });
-      map.addSource(EDIT_SRC, { type: "geojson", data: emptyFC() });
-
-      map.addLayer({
-        id: "track-halo",
-        type: "line",
-        source: SRC,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": readColor("--track-halo", "rgba(47,74,92,0.18)"),
-          "line-width": 9,
-          "line-blur": 1,
-        },
-      });
-      map.addLayer({
-        id: "track-line",
-        type: "line",
-        source: SRC,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": readColor("--track", "#2f4a5c"), "line-width": 3.5 },
-      });
-      // comparison track (teal, dashed) sits above the base track
-      map.addLayer({
-        id: "compare-line",
-        type: "line",
-        source: CMP_SRC,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": readColor("--compare", "#2f8fa8"),
-          "line-width": 3,
-          "line-dasharray": [2, 1.5],
-        },
-      });
-      // edit line (coral) sits on top
-      map.addLayer({
-        id: "edit-halo",
-        type: "line",
-        source: EDIT_SRC,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": readColor("--accent", "#e8663c"),
-          "line-width": 10,
-          "line-opacity": 0.18,
-          "line-blur": 1,
-        },
-      });
-      map.addLayer({
-        id: "edit-line",
-        type: "line",
-        source: EDIT_SRC,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": readColor("--accent", "#e8663c"), "line-width": 3.5 },
-      });
-
-      renderView();
-      renderCompare();
-      renderEdit();
-      pRef.current.onReady?.(map);
-    });
-
-    map.on("mousemove", (e) => {
-      if (modeRef.current !== "view") return;
-      const t = focusRef.current;
-      if (!t || t.points.length < 2) return;
-      pRef.current.onHover(nearestPointIdx(t, e.lngLat.lng, e.lngLat.lat));
-    });
-    map.on("mouseout", () => {
-      if (modeRef.current === "view") pRef.current.onHover(null);
-    });
-
-    map.on("click", (e) => {
-      if (modeRef.current === "draw" || modeRef.current === "waypoint") {
-        pRef.current.onMapClick({ lng: e.lngLat.lng, lat: e.lngLat.lat });
-      }
+    // "styledata" couvre le chargement initial ET chaque setStyle ;
+    // l'injection est idempotente donc sans risque d'appel multiple.
+    map.on("styledata", () => {
+      styleReady.current = true;
+      injectSourcesAndLayers(map);
+      renderLayers();
+      renderApproach();
     });
 
     mapRef.current = map;
     if (import.meta.env.DEV) (window as unknown as { __map?: MlMap }).__map = map;
+    p.onMapReady?.(map);
     return () => {
       map.remove();
       mapRef.current = null;
-      readyRef.current = false;
+      styleReady.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Cursor hint for edit modes.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    map.getCanvas().style.cursor =
-      editMode === "draw" || editMode === "waypoint" ? "crosshair" : "";
-  }, [editMode]);
+  function injectSourcesAndLayers(map: MlMap) {
+    if (!map.getSource(LAYERS_SRC)) {
+      map.addSource(LAYERS_SRC, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+    }
+    if (!map.getSource(APPROACH_SRC)) {
+      map.addSource(APPROACH_SRC, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+    }
+    if (!map.getLayer("trk-casing")) {
+      map.addLayer({
+        id: "trk-casing",
+        type: "line",
+        source: LAYERS_SRC,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": ["+", ["get", "width"], 3],
+          "line-opacity": 0.6,
+        },
+      });
+      map.addLayer({
+        id: "trk-line",
+        type: "line",
+        source: LAYERS_SRC,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": ["get", "color"],
+          "line-width": ["get", "width"],
+          "line-opacity": ["get", "opacity"],
+        },
+      });
+      map.addLayer({
+        id: "approach-line",
+        type: "line",
+        source: APPROACH_SRC,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#0a84ff",
+          "line-width": 4,
+          "line-dasharray": [0.5, 2],
+        },
+      });
+    }
+  }
 
-  function renderView() {
+  function renderLayers() {
     const map = mapRef.current;
-    if (!map || !readyRef.current) return;
-    (map.getSource(SRC) as maplibregl.GeoJSONSource | undefined)?.setData(
-      geojson ?? emptyFC(),
-    );
+    if (!map || !styleReady.current) return;
+    const src = map.getSource(LAYERS_SRC) as maplibregl.GeoJSONSource | undefined;
+    src?.setData(layersToFC(pRef.current.layers));
 
+    // départ / arrivée du calque actif
     startMarker.current?.remove();
     finishMarker.current?.remove();
     startMarker.current = null;
     finishMarker.current = null;
-
-    if (track && track.points.length > 1) {
-      const first = track.points[0];
-      const last = track.points[track.points.length - 1];
-      startMarker.current = new maplibregl.Marker({ element: dot("start") })
-        .setLngLat([first.lng, first.lat])
+    const active = pRef.current.layers.find(
+      (l) => l.id === pRef.current.activeLayerId && l.visible,
+    );
+    if (active && active.track.points.length > 1) {
+      const pts = active.track.points;
+      startMarker.current = new maplibregl.Marker({ element: endDot("#34c759") })
+        .setLngLat([pts[0].lng, pts[0].lat])
         .addTo(map);
-      finishMarker.current = new maplibregl.Marker({ element: dot("finish") })
-        .setLngLat([last.lng, last.lat])
+      finishMarker.current = new maplibregl.Marker({ element: endDot("#1c1c1e") })
+        .setLngLat([pts[pts.length - 1].lng, pts[pts.length - 1].lat])
         .addTo(map);
-
-      const b = new LngLatBounds();
-      for (const p of track.points) b.extend([p.lng, p.lat]);
-      map.fitBounds(b, { padding: 64, duration: 700, maxZoom: 15 });
     }
   }
 
-  function renderCompare() {
+  function renderApproach() {
     const map = mapRef.current;
-    if (!map || !readyRef.current) return;
-    (map.getSource(CMP_SRC) as maplibregl.GeoJSONSource | undefined)?.setData(
-      compareGeojson ?? emptyFC(),
-    );
-  }
-
-  function renderEdit() {
-    const map = mapRef.current;
-    if (!map || !readyRef.current) return;
-    (map.getSource(EDIT_SRC) as maplibregl.GeoJSONSource | undefined)?.setData(
-      editRoute ? routeToGeoJSON(editRoute) : emptyFC(),
-    );
-
-    // rebuild anchor markers
-    anchorMarkers.current.forEach((m) => m.remove());
-    anchorMarkers.current = [];
-    waypointMarkers.current.forEach((m) => m.remove());
-    waypointMarkers.current = [];
-    if (!editRoute) return;
-
-    editRoute.anchors.forEach((a, i) => {
-      const el = anchorEl();
-      let dragged = false;
-      const m = new maplibregl.Marker({ element: el, draggable: true })
-        .setLngLat([a.lng, a.lat])
-        .addTo(map);
-      m.on("dragstart", () => {
-        dragged = true;
-      });
-      m.on("dragend", () => {
-        const ll = m.getLngLat();
-        pRef.current.onAnchorDragEnd(i, { lng: ll.lng, lat: ll.lat });
-        setTimeout(() => (dragged = false), 0);
-      });
-      el.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        if (!dragged) pRef.current.onAnchorClick(i);
-      });
-      anchorMarkers.current.push(m);
-    });
-
-    editRoute.waypoints.forEach((w) => {
-      const el = waypointEl(w.name);
-      const m = new maplibregl.Marker({ element: el, anchor: "bottom" })
-        .setLngLat([w.lng, w.lat])
-        .addTo(map);
-      el.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        pRef.current.onWaypointClick(w.id);
-      });
-      waypointMarkers.current.push(m);
+    if (!map || !styleReady.current) return;
+    const src = map.getSource(APPROACH_SRC) as maplibregl.GeoJSONSource | undefined;
+    const coords = pRef.current.approach;
+    src?.setData({
+      type: "FeatureCollection",
+      features:
+        coords && coords.length >= 2
+          ? [
+              {
+                type: "Feature",
+                properties: {},
+                geometry: { type: "LineString", coordinates: coords },
+              },
+            ]
+          : [],
     });
   }
 
+  /* changement de fond de carte (pas au montage : style déjà passé au constructeur) */
+  const firstProvider = useRef(true);
   useEffect(() => {
-    renderView();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [geojson, track]);
-
-  useEffect(() => {
-    renderCompare();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [compareGeojson]);
-
-  useEffect(() => {
-    renderEdit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editRoute]);
-
-  // coral hover marker (scrub link, indexes into the focus track)
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !readyRef.current) return;
-    if (hoverIdx == null || !focusTrack || !focusTrack.points[hoverIdx]) {
-      hoverMarker.current?.remove();
-      hoverMarker.current = null;
+    if (firstProvider.current) {
+      firstProvider.current = false;
       return;
     }
-    const p = focusTrack.points[hoverIdx];
-    if (!hoverMarker.current) {
-      hoverMarker.current = new maplibregl.Marker({ element: hoverDot() });
+    const map = mapRef.current;
+    if (!map) return;
+    styleReady.current = false;
+    map.setStyle(getProvider(p.providerId).style, { diff: false });
+    // "styledata" ré-injecte tout
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.providerId]);
+
+  /* rendu des calques */
+  useEffect(() => {
+    renderLayers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.layers, p.activeLayerId]);
+
+  /* cadrage initial sur le calque actif (hors navigation) */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || p.navigating) return;
+    const active = p.layers.find((l) => l.id === p.activeLayerId && l.visible);
+    if (!active || active.track.points.length < 2) return;
+    const b = new maplibregl.LngLatBounds();
+    for (const pt of active.track.points) b.extend([pt.lng, pt.lat]);
+    map.fitBounds(b, { padding: { top: 90, bottom: 220, left: 40, right: 40 }, duration: 600, maxZoom: 15 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.activeLayerId]);
+
+  /* ligne d'approche */
+  useEffect(() => {
+    renderApproach();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.approach]);
+
+  /* position utilisateur + suivi caméra */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!p.fix) {
+      userMarker.current?.remove();
+      userMarker.current = null;
+      return;
     }
-    hoverMarker.current.setLngLat([p.lng, p.lat]).addTo(map);
-  }, [hoverIdx, focusTrack]);
+    if (!userMarker.current) {
+      userMarker.current = new maplibregl.Marker({ element: userDot() });
+    }
+    const el = userMarker.current.getElement();
+    const cone = el.querySelector(".user-dot__cone") as HTMLElement | null;
+    if (cone) {
+      if (p.fix.heading != null) {
+        cone.style.display = "block";
+        cone.style.transform = `rotate(${p.fix.heading}deg)`;
+      } else cone.style.display = "none";
+    }
+    userMarker.current.setLngLat([p.fix.lng, p.fix.lat]).addTo(map);
+
+    // suivi caméra pendant la nav : throttlé à 2,5 s, nord en haut
+    if (p.navigating) {
+      const now = Date.now();
+      if (now - lastCamMove.current > 2500) {
+        lastCamMove.current = now;
+        map.easeTo({
+          center: [p.fix.lng, p.fix.lat],
+          zoom: Math.max(map.getZoom(), 14.5),
+          duration: 800,
+        });
+      }
+    }
+  }, [p.fix, p.navigating]);
 
   return <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />;
 }
 
-/* --- helpers --- */
+/* --- marqueurs DOM --- */
 
-function emptyFC(): FeatureCollection {
-  return { type: "FeatureCollection", features: [] };
-}
-
-function nearestPointIdx(track: Track, lng: number, lat: number): number {
-  const pts = track.points;
-  const cosLat = Math.cos((lat * Math.PI) / 180);
-  let best = 0;
-  let bestD = Infinity;
-  for (let i = 0; i < pts.length; i++) {
-    const dx = (pts[i].lng - lng) * cosLat;
-    const dy = pts[i].lat - lat;
-    const d = dx * dx + dy * dy;
-    if (d < bestD) {
-      bestD = d;
-      best = i;
-    }
-  }
-  return best;
-}
-
-function readColor(varName: string, fallback: string): string {
-  const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-  return v || fallback;
-}
-
-function dot(kind: "start" | "finish"): HTMLElement {
+function userDot(): HTMLElement {
   const el = document.createElement("div");
-  el.className = `trace-marker trace-marker--${kind}`;
-  el.textContent = kind === "start" ? "S" : "F";
+  el.className = "user-dot";
+  el.innerHTML =
+    '<div class="user-dot__pulse"></div><div class="user-dot__cone"></div><div class="user-dot__core"></div>';
   return el;
 }
 
-function hoverDot(): HTMLElement {
+function endDot(color: string): HTMLElement {
   const el = document.createElement("div");
-  el.className = "trace-hover";
+  el.className = "end-dot";
+  el.style.background = color;
   return el;
-}
-
-function anchorEl(): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "edit-anchor";
-  return el;
-}
-
-function waypointEl(name: string): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "edit-waypoint";
-  el.innerHTML = `<span class="edit-waypoint__pin"></span><span class="edit-waypoint__label">${escapeHtml(
-    name,
-  )}</span>`;
-  return el;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === "&"
-      ? "&amp;"
-      : c === "<"
-        ? "&lt;"
-        : c === ">"
-          ? "&gt;"
-          : c === '"'
-            ? "&quot;"
-            : "&#39;",
-  );
 }

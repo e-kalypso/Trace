@@ -45,5 +45,13 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Trace utilise votre position pour vous guider le long de vos tracés GPX.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>La position en arrière-plan permet de continuer le guidage écran éteint et de vous alerter si vous quittez le tracé.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 </dict>
 </plist>
