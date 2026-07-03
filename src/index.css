@@ -80,6 +80,15 @@ body,
   overflow: hidden;
 }
 
+/* iOS : occupe le viewport dynamique réel (encoche + barre home) */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+}
+
 body {
   font-family: var(--sans);
   color: var(--label);

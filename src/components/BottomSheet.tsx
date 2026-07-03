@@ -18,7 +18,9 @@ export default function BottomSheet({ pos, onPos, children }: Props) {
   const [dragY, setDragY] = useState<number | null>(null);
   const startRef = useRef<{ y: number; base: number } | null>(null);
 
-  const heightFor = (p: SheetPos) => POS_VH[p] * window.innerHeight;
+  // visualViewport = hauteur réellement visible sur iOS (encoche/clavier)
+  const vh = () => window.visualViewport?.height ?? window.innerHeight;
+  const heightFor = (p: SheetPos) => POS_VH[p] * vh();
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -31,10 +33,7 @@ export default function BottomSheet({ pos, onPos, children }: Props) {
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!startRef.current) return;
     const dy = startRef.current.y - e.clientY;
-    const h = Math.min(
-      window.innerHeight * 0.92,
-      Math.max(70, startRef.current.base + dy),
-    );
+    const h = Math.min(vh() * 0.92, Math.max(70, startRef.current.base + dy));
     setDragY(h);
   }, []);
 

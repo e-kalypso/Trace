@@ -44,6 +44,12 @@ export default function App() {
     window.setTimeout(() => setToast((t) => (t === m ? null : t)), 2600);
   }, []);
 
+  /** Les sous-pages (détail, réglages) déplient la feuille. */
+  const openPage = useCallback((p: Page) => {
+    setPage(p);
+    setSheetPos(p.kind === "layers" ? "half" : "full");
+  }, []);
+
   /* ---------- import GPX ---------- */
   const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -215,7 +221,7 @@ export default function App() {
               <div className="sheet__titlebar">
                 <h1 className="sheet__title">Tracés</h1>
                 <div className="sheet__titleactions">
-                  <button className="pillbtn" onClick={() => setPage({ kind: "settings" })}>
+                  <button className="pillbtn" onClick={() => openPage({ kind: "settings" })}>
                     Réglages
                   </button>
                   <button
@@ -249,7 +255,7 @@ export default function App() {
                       {l.visible ? "●" : "○"}
                     </button>
                     <span className="row__dot" style={{ background: l.color }} />
-                    <button className="row__main" onClick={() => setPage({ kind: "detail", layerId: l.id })}>
+                    <button className="row__main" onClick={() => openPage({ kind: "detail", layerId: l.id })}>
                       <span className="row__name">
                         {l.name}
                         {L.activeLayer?.id === l.id && <span className="row__badge">actif</span>}
@@ -272,7 +278,7 @@ export default function App() {
           {page.kind === "detail" && detailLayer && (
             <>
               <div className="sheet__titlebar">
-                <button className="backbtn" onClick={() => setPage({ kind: "layers" })}>
+                <button className="backbtn" onClick={() => openPage({ kind: "layers" })}>
                   ‹ Tracés
                 </button>
               </div>
@@ -320,7 +326,7 @@ export default function App() {
           {page.kind === "settings" && (
             <>
               <div className="sheet__titlebar">
-                <button className="backbtn" onClick={() => setPage({ kind: "layers" })}>
+                <button className="backbtn" onClick={() => openPage({ kind: "layers" })}>
                   ‹ Tracés
                 </button>
               </div>
@@ -328,16 +334,20 @@ export default function App() {
 
               <div className="setting">
                 <div className="setting__label">Fond de carte</div>
-                <div className="seg">
+                <div className="group">
                   {PROVIDERS.map((pr) => (
                     <button
                       key={pr.id}
                       disabled={pr.disabled}
-                      title={pr.note}
-                      className={`seg__opt${providerId === pr.id ? " seg__opt--on" : ""}`}
+                      className="group__row"
                       onClick={() => setProviderId(pr.id)}
                     >
-                      {pr.name}
+                      <span className="group__name">{pr.name}</span>
+                      {pr.disabled ? (
+                        <span className="group__note">Bientôt</span>
+                      ) : (
+                        providerId === pr.id && <span className="group__check">✓</span>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -373,10 +383,10 @@ export default function App() {
         </BottomSheet>
       )}
 
+      {/* pas d'attribut accept : iOS grise les .gpx sinon — on valide à la lecture */}
       <input
         ref={inputRef}
         type="file"
-        accept=".gpx,application/gpx+xml,application/xml,text/xml"
         multiple
         hidden
         onChange={(e) => void onPick(e)}

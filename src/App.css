@@ -3,8 +3,9 @@
    ============================================================ */
 
 .app {
-  position: relative;
-  height: 100%;
+  /* ancré aux 4 bords : aucune bande résiduelle possible sur iPhone */
+  position: fixed;
+  inset: 0;
   overflow: hidden;
 }
 
@@ -375,6 +376,44 @@
   margin-top: 8px;
   line-height: 1.4;
 }
+/* liste groupée façon Réglages iOS */
+.group {
+  background: var(--fill);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.group__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 13px 16px;
+  text-align: left;
+  border-bottom: 0.5px solid var(--separator);
+}
+.group__row:last-child {
+  border-bottom: none;
+}
+.group__row:active:not(:disabled) {
+  background: var(--fill-2);
+}
+.group__row:disabled {
+  opacity: 0.45;
+}
+.group__name {
+  font-size: 16px;
+  font-weight: 500;
+}
+.group__check {
+  color: var(--blue);
+  font-size: 17px;
+  font-weight: 700;
+}
+.group__note {
+  font-size: 13px;
+  color: var(--label-3);
+}
+
 .seg {
   display: flex;
   background: var(--fill);

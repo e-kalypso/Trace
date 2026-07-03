@@ -8,9 +8,6 @@ const config: CapacitorConfig = {
   appName: "Trace",
   webDir: "dist",
   backgroundColor: "#141b23",
-  ios: {
-    contentInset: "always",
-  },
 };
 
 export default config;
