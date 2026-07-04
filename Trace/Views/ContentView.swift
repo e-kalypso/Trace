@@ -56,7 +56,11 @@ struct ContentView: View {
                     recordedPoints = model.stopRecording()
                     if recordedPoints.count >= 2 {
                         recordingName = "Sortie du \(Date().formatted(date: .abbreviated, time: .omitted))"
-                        showSaveRecording = true
+                        // petite pause : la feuille principale se re-présente
+                        // d'abord, puis l'alerte s'affiche par-dessus
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                            showSaveRecording = true
+                        }
                     }
                 }
             }
@@ -139,22 +143,51 @@ struct ContentView: View {
             .presentationBackgroundInteraction(.enabled(upThrough: .large))
             .presentationBackground(.regularMaterial)
             .interactiveDismissDisabled()
-        }
-        // Aperçu avant import
-        .sheet(item: $pendingImport) { pending in
-            ImportPreviewView(pending: pending) {
-                importNow(pending)
-                pendingImport = nil
-            } onCancel: {
-                pendingImport = nil
+            // ⬇︎ présentées DEPUIS la feuille (iOS n'autorise qu'une
+            // présentation par contexte : la base est déjà occupée)
+            .fileImporter(
+                isPresented: $showImporter,
+                allowedContentTypes: [gpxType, .xml],
+                allowsMultipleSelection: true
+            ) { result in
+                handleImporter(result)
             }
-        }
-        .fileImporter(
-            isPresented: $showImporter,
-            allowedContentTypes: [gpxType, .xml],
-            allowsMultipleSelection: true
-        ) { result in
-            handleImporter(result)
+            .sheet(item: $pendingImport) { pending in
+                ImportPreviewView(pending: pending) {
+                    importNow(pending)
+                    pendingImport = nil
+                } onCancel: {
+                    pendingImport = nil
+                }
+            }
+            .sheet(isPresented: .init(
+                get: { newWaypointCoord != nil },
+                set: { if !$0 { newWaypointCoord = nil } }
+            )) {
+                if let coord = newWaypointCoord {
+                    NewWaypointSheet(coordinate: coord,
+                                     altitude: model.location.fix?.altitude) {
+                        newWaypointCoord = nil
+                    }
+                }
+            }
+            .alert("Enregistrer la sortie", isPresented: $showSaveRecording) {
+                TextField("Nom", text: $recordingName)
+                Button("Ignorer", role: .cancel) { recordedPoints = [] }
+                Button("Enregistrer") { saveRecording() }
+            } message: {
+                Text("\(Fmt.distance(recordedPoints.last?.dist ?? 0)) parcourus")
+            }
+            .overlay(alignment: .bottom) {
+                if let toast {
+                    Text(toast)
+                        .font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(.bottom, 12)
+                }
+            }
         }
         // GPX ouverts depuis Mail / Fichiers / AirDrop
         .onOpenURL { url in
@@ -170,26 +203,7 @@ struct ContentView: View {
                 model.requestFit([fix.coordinate])
             }
         }
-        // nouveau waypoint (appui long)
-        .sheet(isPresented: .init(
-            get: { newWaypointCoord != nil },
-            set: { if !$0 { newWaypointCoord = nil } }
-        )) {
-            if let coord = newWaypointCoord {
-                NewWaypointSheet(coordinate: coord,
-                                 altitude: model.location.fix?.altitude) {
-                    newWaypointCoord = nil
-                }
-            }
-        }
-        // sauvegarde de l'enregistrement
-        .alert("Enregistrer la sortie", isPresented: $showSaveRecording) {
-            TextField("Nom", text: $recordingName)
-            Button("Ignorer", role: .cancel) { recordedPoints = [] }
-            Button("Enregistrer") { saveRecording() }
-        } message: {
-            Text("\(Fmt.distance(recordedPoints.last?.dist ?? 0)) parcourus")
-        }
+
     }
 
     private func saveRecording() {
