@@ -16,6 +16,9 @@ final class FollowSession: ObservableObject {
         var offRoute = false
         var arrived = false
         var etaSeconds: Double?
+        var progress: Double = 0            // 0…1
+        var nextWaypointName: String?
+        var nextWaypointIn: Double?         // m le long de la trace
     }
 
     @Published var state = State()
@@ -29,14 +32,27 @@ final class FollowSession: ObservableObject {
     private var arrivedNotified = false
     private var emaSpeed: Double = 1.1   // ~4 km/h
 
+    /// Waypoints du GPX projetés sur la trace (nom, distance cumulée).
+    private let routeWaypoints: [(name: String, dist: Double)]
+    private var notifiedWaypoints: Set<Int> = []
+
     static let offRouteThreshold: Double = 45      // m
     private static let offRouteDelay: TimeInterval = 12
     private static let arriveThreshold: Double = 25
+    private static let waypointAlert: Double = 120
 
-    init(points: [TrackPoint], name: String) {
+    init(points: [TrackPoint], name: String, waypoints: [Waypoint] = []) {
         self.points = points
         self.trackName = name
         self.total = points.last?.dist ?? 0
+        self.routeWaypoints = waypoints
+            .compactMap { w in
+                guard let s = TrackGeometry.snap(to: points, lat: w.lat, lon: w.lon,
+                                                 hint: nil),
+                      s.offset < 200 else { return nil }   // trop loin = pas sur l'itinéraire
+                return (w.name, s.dist)
+            }
+            .sorted { $0.dist < $1.dist }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
@@ -72,6 +88,21 @@ final class FollowSession: ObservableObject {
         } else {
             offRouteSince = nil
             offRouteNotified = false
+        }
+
+        s.progress = total > 0 ? s.done / total : 0
+
+        // prochain waypoint devant nous + alerte d'approche
+        for (i, wp) in routeWaypoints.enumerated() where wp.dist > s.done {
+            s.nextWaypointName = wp.name
+            s.nextWaypointIn = wp.dist - s.done
+            if wp.dist - s.done < Self.waypointAlert && !notifiedWaypoints.contains(i) {
+                notifiedWaypoints.insert(i)
+                Self.haptic(.success)
+                Self.notify(title: wp.name,
+                            body: "À \(Int(wp.dist - s.done)) m devant vous.")
+            }
+            break
         }
 
         if s.remaining <= Self.arriveThreshold {

@@ -51,10 +51,13 @@ struct SettingsView: View {
                 Toggle(isOn: $model.balancedGPS) {
                     Label("Économie de batterie", systemImage: "battery.75percent")
                 }
+                Toggle(isOn: $model.nightMode) {
+                    Label("Mode nuit (vision nocturne)", systemImage: "moon.stars.fill")
+                }
             } header: {
-                Text("GPS")
+                Text("GPS et affichage")
             } footer: {
-                Text("Espace les mesures GPS (~15 m) pendant le suivi. Recommandé pour les sorties de plusieurs heures.")
+                Text("Économie : mesures GPS espacées (~15 m), pour les longues sorties. Mode nuit : filtre rouge sombre qui préserve la vision nocturne en bivouac ou marche de nuit.")
             }
 
             if !waypoints.isEmpty {

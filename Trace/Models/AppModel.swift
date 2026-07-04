@@ -96,11 +96,16 @@ final class AppModel: ObservableObject {
     @Published var balancedGPS: Bool {
         didSet { UserDefaults.standard.set(balancedGPS, forKey: "balancedGPS") }
     }
+    /// Mode nuit : filtre rouge sombre pour préserver la vision nocturne (§10).
+    @Published var nightMode: Bool {
+        didSet { UserDefaults.standard.set(nightMode, forKey: "nightMode") }
+    }
 
     init() {
         basemap = Basemap(rawValue: UserDefaults.standard.string(forKey: "basemap") ?? "")
             ?? .appleStandard
         balancedGPS = UserDefaults.standard.bool(forKey: "balancedGPS")
+        nightMode = UserDefaults.standard.bool(forKey: "nightMode")
     }
 
     /// Cache uuid → trace parsée (le fichier .gpx reste la source de vérité).
@@ -163,15 +168,38 @@ final class AppModel: ObservableObject {
 
     func startFollow(record: TrackRecord) {
         guard let t = track(for: record) else { return }
-        follow = FollowSession(points: t.points, name: record.name)
+        follow = FollowSession(points: t.points, name: record.name,
+                               waypoints: t.waypoints)
         location.setBalancedAccuracy(balancedGPS)
         location.start(background: true)
+        UIApplication.shared.isIdleTimerDisabled = true   // écran allumé en nav
     }
 
     func stopFollow() {
         follow = nil
-        location.stop()
-        // on garde l'affichage de position si l'utilisateur relance « ma position »
+        if recording == nil { location.stop() }
+        UIApplication.shared.isIdleTimerDisabled = (recording != nil)
+    }
+
+    // MARK: guidage « cap vers un point » (hors ligne, vol d'oiseau)
+
+    struct GuideTarget {
+        var name: String
+        var lat: Double
+        var lon: Double
+    }
+
+    @Published var guide: GuideTarget?
+
+    func startGuide(name: String, lat: Double, lon: Double) {
+        guide = GuideTarget(name: name, lat: lat, lon: lon)
+        location.setBalancedAccuracy(false)
+        location.start(background: false)
+    }
+
+    func stopGuide() {
+        guide = nil
+        if follow == nil && recording == nil { location.stop() }
     }
 
     // MARK: enregistrement de sortie
@@ -182,6 +210,7 @@ final class AppModel: ObservableObject {
         recording = RecordingSession()
         location.setBalancedAccuracy(balancedGPS)
         location.start(background: true)
+        UIApplication.shared.isIdleTimerDisabled = true
     }
 
     /// Termine et renvoie les points capturés (à sauvegarder par l'appelant).
@@ -189,6 +218,7 @@ final class AppModel: ObservableObject {
         let pts = recording?.finish() ?? []
         recording = nil
         if follow == nil { location.stop() }
+        UIApplication.shared.isIdleTimerDisabled = (follow != nil)
         return pts
     }
 }

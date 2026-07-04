@@ -10,6 +10,7 @@ struct TrackDetailView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var model: AppModel
+    @Query(sort: \TrackRecord.sortOrder) private var records: [TrackRecord]
 
     let record: TrackRecord
 
@@ -48,6 +49,14 @@ struct TrackDetailView: View {
                 }
 
                 Section {
+                    Button {
+                        if let first = t.points.first {
+                            model.startGuide(name: "Départ · \(record.name)",
+                                             lat: first.lat, lon: first.lon)
+                        }
+                    } label: {
+                        Label("Cap vers le départ (hors ligne)", systemImage: "safari")
+                    }
                     NavigationLink {
                         PlanView(record: record)
                     } label: {
@@ -57,6 +66,9 @@ struct TrackDetailView: View {
                         OfflineView(record: record)
                     } label: {
                         Label("Télécharger la zone hors ligne", systemImage: "arrow.down.circle")
+                    }
+                    ShareLink(item: GPXStore.url(for: record.uuid)) {
+                        Label("Partager le fichier GPX", systemImage: "square.and.arrow.up")
                     }
                 }
 
@@ -87,6 +99,21 @@ struct TrackDetailView: View {
                         apply { TrackGeometry.reversed($0) }
                     } label: {
                         Label("Inverser le sens", systemImage: "arrow.left.arrow.right")
+                    }
+                    NavigationLink {
+                        CutView(record: record)
+                    } label: {
+                        Label("Couper / rogner / scinder", systemImage: "scissors")
+                    }
+                    NavigationLink {
+                        MergeView(record: record)
+                    } label: {
+                        Label("Fusionner avec une autre trace", systemImage: "link")
+                    }
+                    Button {
+                        duplicate()
+                    } label: {
+                        Label("Dupliquer", systemImage: "plus.square.on.square")
                     }
                     Button {
                         apply { TrackGeometry.simplified($0, toleranceMeters: 5) }
@@ -182,6 +209,21 @@ struct TrackDetailView: View {
     }
 
     // MARK: éditions
+
+    /// Copie indépendante de la trace (avant une édition destructive).
+    private func duplicate() {
+        guard let t = parsed else { return }
+        let uuid = UUID()
+        let name = "\(record.name) copie"
+        let gpx = GPXWriter.gpx(name: name, points: t.points, waypoints: t.waypoints)
+        guard (try? GPXStore.save(gpx, for: uuid)) != nil else { return }
+        context.insert(TrackRecord(
+            uuid: uuid, name: name,
+            colorHex: TrackPalette.hex(at: records.count),
+            sortOrder: records.count,
+            distance: record.distance, ascent: record.ascent, descent: record.descent))
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
 
     /// Applique une transformation géométrique puis réécrit le fichier GPX.
     private func apply(_ transform: ([TrackPoint]) -> [TrackPoint]) {

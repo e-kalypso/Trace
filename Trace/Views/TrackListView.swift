@@ -1,9 +1,23 @@
 //  TrackListView.swift
-//  Liste des traces : visibilité, couleur, stats, réorganisation,
-//  import GPX (Fichiers / multi-sélection).
+//  Liste des traces : visibilité, couleur, stats, recherche, tri,
+//  réorganisation manuelle, import GPX multi-sélection.
 
 import SwiftData
 import SwiftUI
+
+enum TrackSort: String, CaseIterable, Identifiable {
+    case manual, name, recent, distance, ascent
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .manual: return "Ordre manuel"
+        case .name: return "Nom"
+        case .recent: return "Plus récentes"
+        case .distance: return "Distance"
+        case .ascent: return "Dénivelé"
+        }
+    }
+}
 
 struct TrackListView: View {
     @Environment(\.modelContext) private var context
@@ -12,6 +26,25 @@ struct TrackListView: View {
 
     @Binding var selectedUUID: UUID?
     var onImportTap: () -> Void
+
+    @State private var search = ""
+    @State private var sort: TrackSort = .manual
+
+    private var shown: [TrackRecord] {
+        var list = records
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        if !q.isEmpty {
+            list = list.filter { $0.name.lowercased().contains(q) }
+        }
+        switch sort {
+        case .manual: break
+        case .name: list.sort { $0.name.localizedCompare($1.name) == .orderedAscending }
+        case .recent: list.sort { $0.createdAt > $1.createdAt }
+        case .distance: list.sort { $0.distance > $1.distance }
+        case .ascent: list.sort { $0.ascent > $1.ascent }
+        }
+        return list
+    }
 
     var body: some View {
         List {
@@ -24,7 +57,7 @@ struct TrackListView: View {
                 .listRowBackground(Color.clear)
             }
 
-            ForEach(records) { rec in
+            ForEach(shown) { rec in
                 NavigationLink(value: rec.uuid) {
                     HStack(spacing: 12) {
                         Button {
@@ -52,13 +85,14 @@ struct TrackListView: View {
                 }
             }
             .onMove { from, to in
+                guard sort == .manual, search.isEmpty else { return }
                 var list = records
                 list.move(fromOffsets: from, toOffset: to)
                 for (i, r) in list.enumerated() { r.sortOrder = i }
             }
             .onDelete { offsets in
                 for i in offsets {
-                    let r = records[i]
+                    let r = shown[i]
                     GPXStore.delete(for: r.uuid)
                     model.invalidate(r.uuid)
                     context.delete(r)
@@ -66,12 +100,25 @@ struct TrackListView: View {
             }
         }
         .scrollContentBackground(.hidden)
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .automatic),
+                    prompt: "Rechercher une trace")
         .navigationTitle("Tracés")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 NavigationLink(value: "settings") {
                     Image(systemName: "gearshape")
+                }
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    Picker("Tri", selection: $sort) {
+                        ForEach(TrackSort.allCases) { s in
+                            Text(s.label).tag(s)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
                 }
             }
             ToolbarItem(placement: .topBarTrailing) { EditButton() }

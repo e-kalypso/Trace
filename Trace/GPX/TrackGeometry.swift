@@ -99,7 +99,27 @@ enum TrackGeometry {
         return s
     }
 
+    /// Cap initial (degrés 0–360) d'un point vers un autre.
+    static func bearing(fromLat: Double, fromLon: Double,
+                        toLat: Double, toLon: Double) -> Double {
+        let a = fromLat * .pi / 180
+        let b = toLat * .pi / 180
+        let dLon = (toLon - fromLon) * .pi / 180
+        let y = sin(dLon) * cos(b)
+        let x = cos(a) * sin(b) - sin(a) * cos(b) * cos(dLon)
+        return (atan2(y, x) * 180 / .pi + 360)
+            .truncatingRemainder(dividingBy: 360)
+    }
+
     // MARK: éditions
+
+    /// Concatène deux traces bout à bout (fusion).
+    static func merged(_ a: [TrackPoint], _ b: [TrackPoint]) -> [TrackPoint] {
+        var out = a + b
+        for i in out.indices { out[i].time = nil }
+        accumulateDistances(&out)
+        return out
+    }
 
     static func reversed(_ pts: [TrackPoint]) -> [TrackPoint] {
         var out = Array(pts.reversed())

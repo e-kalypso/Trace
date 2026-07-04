@@ -16,6 +16,8 @@ final class ColoredPolyline: MKPolyline {
 
 final class WaypointAnnotation: MKPointAnnotation {}
 final class ScrubAnnotation: MKPointAnnotation {}
+final class StartAnnotation: MKPointAnnotation {}
+final class FinishAnnotation: MKPointAnnotation {}
 
 /// Waypoint personnel (appui long) — porte son symbole SF.
 final class PersonalAnnotation: MKPointAnnotation {
@@ -178,7 +180,9 @@ struct MapContainerView: UIViewRepresentable {
 
     private func rebuildTracks(on map: MKMapView) {
         map.removeOverlays(map.overlays.filter { $0 is ColoredPolyline })
-        map.removeAnnotations(map.annotations.filter { $0 is WaypointAnnotation })
+        map.removeAnnotations(map.annotations.filter {
+            $0 is WaypointAnnotation || $0 is StartAnnotation || $0 is FinishAnnotation
+        })
 
         // inactives d'abord, active au-dessus
         for t in tracks.sorted(by: { !$0.isActive && $1.isActive }) {
@@ -195,6 +199,15 @@ struct MapContainerView: UIViewRepresentable {
                     a.title = w.name
                     map.addAnnotation(a)
                 }
+                // départ / arrivée : le sens de la trace devient lisible
+                let start = StartAnnotation()
+                start.coordinate = t.coordinates[0]
+                start.title = "Départ"
+                map.addAnnotation(start)
+                let finish = FinishAnnotation()
+                finish.coordinate = t.coordinates[t.coordinates.count - 1]
+                finish.title = "Arrivée"
+                map.addAnnotation(finish)
             }
         }
     }
@@ -256,6 +269,24 @@ struct MapContainerView: UIViewRepresentable {
                 v.glyphImage = UIImage(systemName: "flag.fill")
                 v.markerTintColor = UIColor(hex: "E8663C")
                 v.canShowCallout = true
+                return v
+            }
+            if annotation is StartAnnotation || annotation is FinishAnnotation {
+                let isStart = annotation is StartAnnotation
+                let id = isStart ? "start" : "finish"
+                let v = mapView.dequeueReusableAnnotationView(withIdentifier: id)
+                    ?? MKAnnotationView(annotation: annotation, reuseIdentifier: id)
+                v.annotation = annotation
+                let size: CGFloat = 18
+                v.frame = CGRect(x: 0, y: 0, width: size, height: size)
+                v.layer.cornerRadius = size / 2
+                v.backgroundColor = isStart
+                    ? UIColor(hex: "30D158")
+                    : UIColor(hex: "1C1C1E")
+                v.layer.borderColor = UIColor.white.cgColor
+                v.layer.borderWidth = 3
+                v.canShowCallout = true
+                v.displayPriority = .required
                 return v
             }
             if let personal = annotation as? PersonalAnnotation {

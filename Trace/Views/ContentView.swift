@@ -71,7 +71,7 @@ struct ContentView: View {
                     model.stopFollow()
                 }
             } else if model.recording == nil {
-                // boutons flottants : ma position + enregistrer
+                // boutons flottants — sous la boussole MapKit (fix offset)
                 VStack(spacing: 10) {
                     HStack {
                         Spacer()
@@ -99,12 +99,32 @@ struct ContentView: View {
                                     .frame(width: 44, height: 44)
                                     .background(.regularMaterial, in: Circle())
                             }
+                            AltChip(location: model.location)
                         }
                         .padding(.trailing, 12)
-                        .padding(.top, 56)
+                        .padding(.top, 118)
                     }
                     Spacer()
                 }
+            }
+
+            // HUD « cap vers un point » (hors ligne, vol d'oiseau)
+            if let guide = model.guide {
+                GuideHUDView(target: guide, location: model.location) {
+                    model.stopGuide()
+                }
+            }
+
+            // mode nuit : filtre rouge sombre, ne bloque pas les taps
+            if model.nightMode {
+                Color(red: 0.4, green: 0, blue: 0)
+                    .opacity(0.35)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                Color.black
+                    .opacity(0.25)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
             }
 
             if let toast {
@@ -245,7 +265,8 @@ struct ContentView: View {
             if urls.count == 1 {
                 single = PendingImport(parsed: parsed, rawData: data)
             } else {
-                importParsed(parsed, data: data)
+                // offset = parsedOK : chaque trace du lot a SA couleur
+                importParsed(parsed, data: data, colorOffset: parsedOK)
                 parsedOK += 1
             }
         }
@@ -277,7 +298,7 @@ struct ContentView: View {
         flash("« \(pending.parsed.name) » importée")
     }
 
-    private func importParsed(_ parsed: ParsedTrack, data: Data) {
+    private func importParsed(_ parsed: ParsedTrack, data: Data, colorOffset: Int = 0) {
         let uuid = UUID()
         let text = String(data: data, encoding: .utf8)
             ?? GPXWriter.gpx(name: parsed.name, points: parsed.points, waypoints: parsed.waypoints)
@@ -287,11 +308,13 @@ struct ContentView: View {
             flash("Impossible d'enregistrer la trace")
             return
         }
+        // records n'est pas rafraîchi au milieu d'un import par lot :
+        // colorOffset garantit une couleur différente à chaque fichier.
         let rec = TrackRecord(
             uuid: uuid,
             name: parsed.name,
-            colorHex: TrackPalette.hex(at: records.count),
-            sortOrder: records.count,
+            colorHex: TrackPalette.hex(at: records.count + colorOffset),
+            sortOrder: records.count + colorOffset,
             distance: parsed.stats.distance,
             ascent: parsed.stats.ascent,
             descent: parsed.stats.descent
@@ -363,6 +386,12 @@ struct FollowHUDView: View {
                          : "encore \(Fmt.distance(st.remaining))")
                         .font(.footnote.monospacedDigit())
                         .foregroundStyle(.secondary)
+                    if let wp = st.nextWaypointName, let d = st.nextWaypointIn {
+                        Label("\(wp) dans \(Fmt.distance(d))", systemImage: "flag.fill")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(Color.accentColor)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
                 GPSBadge(location: location)
@@ -370,6 +399,12 @@ struct FollowHUDView: View {
             .padding(14)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
             .padding(.horizontal, 12)
+
+            // progression le long de la trace
+            ProgressView(value: st.progress)
+                .tint(Color.accentColor)
+                .padding(.horizontal, 24)
+                .padding(.top, 2)
 
             Spacer()
 
@@ -445,5 +480,83 @@ struct RecordingHUDView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
         }
+    }
+}
+
+// MARK: - Altimètre live (petit cadran sous les boutons)
+
+private struct AltChip: View {
+    @ObservedObject var location: LocationManager
+    var body: some View {
+        if let fix = location.fix {
+            Text("\(Int(fix.altitude)) m")
+                .font(.caption.monospacedDigit().weight(.bold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.regularMaterial, in: Capsule())
+        }
+    }
+}
+
+// MARK: - HUD « cap vers un point » (boussole hors ligne)
+
+struct GuideHUDView: View {
+    let target: AppModel.GuideTarget
+    @ObservedObject var location: LocationManager
+    var onStop: () -> Void
+
+    private var distance: Double? {
+        guard let fix = location.fix else { return nil }
+        return TrackGeometry.haversine(
+            fix.coordinate.latitude, fix.coordinate.longitude,
+            target.lat, target.lon)
+    }
+
+    /// Rotation de la flèche : cap vers la cible moins cap de marche.
+    private var arrowAngle: Double {
+        guard let fix = location.fix else { return 0 }
+        let b = TrackGeometry.bearing(
+            fromLat: fix.coordinate.latitude, fromLon: fix.coordinate.longitude,
+            toLat: target.lat, toLon: target.lon)
+        let course = fix.course >= 0 ? fix.course : 0
+        return b - course
+    }
+
+    var body: some View {
+        VStack {
+            HStack(spacing: 14) {
+                Image(systemName: "location.north.fill")
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(Color.accentColor)
+                    .rotationEffect(.degrees(arrowAngle))
+                    .animation(.easeInOut(duration: 0.4), value: arrowAngle)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(target.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                    HStack(spacing: 8) {
+                        Text(distance.map { Fmt.distance($0) } ?? "recherche GPS…")
+                            .font(.footnote.monospacedDigit().weight(.semibold))
+                        if let fix = location.fix, fix.course < 0 {
+                            Text("· flèche = nord si vous êtes à l'arrêt")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Spacer()
+                Button(action: onStop) {
+                    Image(systemName: "xmark")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                        .background(.thinMaterial, in: Circle())
+                }
+            }
+            .padding(14)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .padding(.horizontal, 12)
+            Spacer()
+        }
+        .padding(.top, 4)
     }
 }

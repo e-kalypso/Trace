@@ -32,9 +32,12 @@ final class TrackRecord {
     }
 }
 
-/// Palette iOS attribuée aux traces à l'import.
+/// Palette attribuée aux traces à l'import — 12 couleurs bien distinctes.
 enum TrackPalette {
-    static let hexes = ["0A84FF", "FF9F0A", "30D158", "BF5AF2", "FF375F", "40C8E0"]
+    static let hexes = [
+        "0A84FF", "FF9F0A", "30D158", "BF5AF2", "FF375F", "40C8E0",
+        "FFD60A", "AC8E68", "FF6482", "32ADE6", "A2845E", "66D4CF",
+    ]
     static func hex(at index: Int) -> String { hexes[index % hexes.count] }
 }
 
