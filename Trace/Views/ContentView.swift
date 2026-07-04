@@ -25,27 +25,55 @@ struct ContentView: View {
     @State private var showSaveRecording = false
     @State private var recordingName = ""
     @State private var recordedPoints: [TrackPoint] = []
+    @State private var builderTick = 0
+    @State private var showSaveBuilder = false
+    @State private var builderName = "Mon itinéraire"
+
+    private static let draftID = UUID()
 
     private var gpxType: UTType {
         UTType(filenameExtension: "gpx") ?? .xml
     }
 
+    /// Traces visibles + brouillon du créateur par-dessus.
+    private var displayTracks: [MapTrack] {
+        var tracks = model.mapTracks(records: records, selected: selectedUUID)
+        if let b = model.builder {
+            tracks.append(MapTrack(id: Self.draftID,
+                                   coordinates: b.draftCoordinates,
+                                   waypoints: [],
+                                   colorHex: "FF9F0A",
+                                   isActive: true))
+        }
+        return tracks
+    }
+
     var body: some View {
         ZStack {
             MapContainerView(
-                tracks: model.mapTracks(records: records, selected: selectedUUID),
+                tracks: displayTracks,
                 basemap: model.basemap,
                 scrub: model.scrubCoordinate,
                 fitTarget: model.fitTarget,
                 fitRequest: model.fitRequest,
                 following: model.follow != nil || model.recording != nil,
-                revision: model.mapRevision,
+                revision: model.mapRevision &+ builderTick,
                 personalWaypoints: waypoints.map {
                     PersonalWaypointItem(id: $0.uuid, lat: $0.lat, lon: $0.lon,
                                          name: $0.name, symbol: $0.category.symbol)
                 },
                 onLongPress: { coord in
-                    if model.follow == nil { newWaypointCoord = coord }
+                    if model.follow == nil && model.builder == nil {
+                        newWaypointCoord = coord
+                    }
+                },
+                tapEnabled: model.builder != nil,
+                onTap: { coord in
+                    guard let b = model.builder else { return }
+                    Task {
+                        await b.addAnchor(coord)
+                        builderTick &+= 1
+                    }
                 }
             )
             .ignoresSafeArea()
@@ -65,12 +93,37 @@ struct ContentView: View {
                 }
             }
 
+            // HUD du créateur d'itinéraire
+            if let b = model.builder {
+                BuilderHUDView(
+                    builder: b,
+                    onUndo: {
+                        b.undo()
+                        builderTick &+= 1
+                    },
+                    onSave: { showSaveBuilder = true },
+                    onCancel: {
+                        model.stopBuilder()
+                        builderTick &+= 1
+                    }
+                )
+            }
+
             // HUD de suivi (sous-vue observante)
             if let follow = model.follow {
                 FollowHUDView(follow: follow, location: model.location) {
+                    // consigne la sortie au carnet si on a vraiment marché
+                    if follow.state.progress > 0.3 {
+                        context.insert(HikeLogRecord(
+                            name: follow.trackName,
+                            distance: follow.state.done,
+                            ascent: 0,
+                            duration: Date().timeIntervalSince(follow.startedAt),
+                            kind: "Suivie"))
+                    }
                     model.stopFollow()
                 }
-            } else if model.recording == nil {
+            } else if model.recording == nil && model.builder == nil {
                 // boutons flottants — sous la boussole MapKit (fix offset)
                 VStack(spacing: 10) {
                     HStack {
@@ -96,6 +149,14 @@ struct ContentView: View {
                                 Image(systemName: "record.circle")
                                     .font(.body.weight(.semibold))
                                     .foregroundStyle(.red)
+                                    .frame(width: 44, height: 44)
+                                    .background(.regularMaterial, in: Circle())
+                            }
+                            Button {
+                                model.startBuilder()
+                            } label: {
+                                Image(systemName: "pencil.and.outline")
+                                    .font(.body.weight(.semibold))
                                     .frame(width: 44, height: 44)
                                     .background(.regularMaterial, in: Circle())
                             }
@@ -140,9 +201,17 @@ struct ContentView: View {
                 .transition(.opacity)
             }
         }
-        // Feuille principale, toujours présente hors suivi/enregistrement
+        // sauvegarde de l'itinéraire créé (feuille masquée → pas de conflit)
+        .alert("Enregistrer l'itinéraire", isPresented: $showSaveBuilder) {
+            TextField("Nom", text: $builderName)
+            Button("Annuler", role: .cancel) {}
+            Button("Enregistrer") { saveBuilder() }
+        } message: {
+            Text(model.builder.map { Fmt.distance($0.distance) } ?? "")
+        }
+        // Feuille principale, hors suivi/enregistrement/création
         .sheet(isPresented: .init(
-            get: { model.follow == nil && model.recording == nil },
+            get: { model.follow == nil && model.recording == nil && model.builder == nil },
             set: { _ in }
         )) {
             NavigationStack {
@@ -156,7 +225,13 @@ struct ContentView: View {
                     }
                 }
                 .navigationDestination(for: String.self) { route in
-                    if route == "settings" { SettingsView() }
+                    switch route {
+                    case "settings": SettingsView()
+                    case "discover": DiscoverView()
+                    case "sequence": SequenceView()
+                    case "history": HistoryView()
+                    default: EmptyView()
+                    }
                 }
             }
             .presentationDetents([.height(130), .medium, .large], selection: $detent)
@@ -239,11 +314,43 @@ struct ContentView: View {
                 colorHex: TrackPalette.hex(at: records.count),
                 sortOrder: records.count,
                 distance: stats.distance, ascent: stats.ascent, descent: stats.descent))
+            // carnet : la sortie rejoint l'historique
+            var duration: TimeInterval = 0
+            if let t0 = recordedPoints.first?.time, let t1 = recordedPoints.last?.time {
+                duration = t1.timeIntervalSince(t0)
+            }
+            context.insert(HikeLogRecord(
+                name: name, distance: stats.distance, ascent: stats.ascent,
+                duration: duration, kind: "Enregistrée"))
             flash("Sortie enregistrée ✓")
         } catch {
             flash("Impossible d'enregistrer la sortie")
         }
         recordedPoints = []
+    }
+
+    private func saveBuilder() {
+        guard let b = model.builder else { return }
+        let pts = b.toTrackPoints()
+        guard pts.count >= 2 else { return }
+        let name = builderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = name.isEmpty ? "Mon itinéraire" : name
+        let uuid = UUID()
+        let gpx = GPXWriter.gpx(name: finalName, points: pts, waypoints: [])
+        do {
+            try GPXStore.save(gpx, for: uuid)
+            let stats = TrackGeometry.stats(for: pts)
+            context.insert(TrackRecord(
+                uuid: uuid, name: finalName,
+                colorHex: TrackPalette.hex(at: records.count),
+                sortOrder: records.count,
+                distance: stats.distance, ascent: stats.ascent, descent: stats.descent))
+            flash("« \(finalName) » créé ✓")
+        } catch {
+            flash("Impossible d'enregistrer l'itinéraire")
+        }
+        model.stopBuilder()
+        builderTick &+= 1
     }
 
 

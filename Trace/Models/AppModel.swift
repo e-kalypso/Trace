@@ -168,8 +168,12 @@ final class AppModel: ObservableObject {
 
     func startFollow(record: TrackRecord) {
         guard let t = track(for: record) else { return }
-        follow = FollowSession(points: t.points, name: record.name,
-                               waypoints: t.waypoints)
+        startFollow(points: t.points, name: record.name, waypoints: t.waypoints)
+    }
+
+    /// Variante générique (enchaînement d'étapes, trace combinée…).
+    func startFollow(points: [TrackPoint], name: String, waypoints: [Waypoint]) {
+        follow = FollowSession(points: points, name: name, waypoints: waypoints)
         location.setBalancedAccuracy(balancedGPS)
         location.start(background: true)
         UIApplication.shared.isIdleTimerDisabled = true   // écran allumé en nav
@@ -190,6 +194,17 @@ final class AppModel: ObservableObject {
     }
 
     @Published var guide: GuideTarget?
+
+    /// Créateur d'itinéraire (mode dessin sur carte).
+    @Published var builder: BuilderSession?
+
+    func startBuilder() {
+        builder = BuilderSession()
+    }
+
+    func stopBuilder() {
+        builder = nil
+    }
 
     func startGuide(name: String, lat: Double, lon: Double) {
         guide = GuideTarget(name: name, lat: lat, lon: lon)

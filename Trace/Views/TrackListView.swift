@@ -48,6 +48,18 @@ struct TrackListView: View {
 
     var body: some View {
         List {
+            Section {
+                NavigationLink(value: "discover") {
+                    Label("Découvrir des sentiers à proximité", systemImage: "sparkle.magnifyingglass")
+                }
+                NavigationLink(value: "sequence") {
+                    Label("Enchaîner des étapes (multi-jours)", systemImage: "arrow.triangle.merge")
+                }
+                NavigationLink(value: "history") {
+                    Label("Carnet de randonnées", systemImage: "book.closed.fill")
+                }
+            }
+
             if records.isEmpty {
                 ContentUnavailableView(
                     "Aucune trace",

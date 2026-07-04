@@ -25,6 +25,7 @@ final class FollowSession: ObservableObject {
 
     let points: [TrackPoint]
     let trackName: String
+    let startedAt = Date()
     private let total: Double
     private var hint: Int?
     private var offRouteSince: Date?

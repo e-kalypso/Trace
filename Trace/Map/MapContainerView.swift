@@ -42,6 +42,9 @@ struct MapContainerView: UIViewRepresentable {
     var revision: Int
     var personalWaypoints: [PersonalWaypointItem] = []
     var onLongPress: ((CLLocationCoordinate2D) -> Void)? = nil
+    /// Actif seulement en mode créateur : chaque tap pose un point.
+    var tapEnabled: Bool = false
+    var onTap: ((CLLocationCoordinate2D) -> Void)? = nil
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -52,6 +55,10 @@ struct MapContainerView: UIViewRepresentable {
             action: #selector(Coordinator.handleLongPress(_:)))
         press.minimumPressDuration = 0.5
         map.addGestureRecognizer(press)
+        let tap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleTap(_:)))
+        map.addGestureRecognizer(tap)
         map.showsUserLocation = true
         map.showsCompass = true
         map.showsScale = true
@@ -131,8 +138,10 @@ struct MapContainerView: UIViewRepresentable {
             }
         }
 
-        // --- rappel du callback (closure capturée à jour) ---
+        // --- rappel des callbacks (closures capturées à jour) ---
         coord.onLongPress = onLongPress
+        coord.onTap = onTap
+        coord.tapEnabled = tapEnabled
 
         // --- curseur de scrub ---
         if let s = scrub {
@@ -222,6 +231,8 @@ struct MapContainerView: UIViewRepresentable {
         var wasFollowing = false
         var scrubAnnotation: ScrubAnnotation?
         var onLongPress: ((CLLocationCoordinate2D) -> Void)? = nil
+        var onTap: ((CLLocationCoordinate2D) -> Void)? = nil
+        var tapEnabled = false
 
         @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
             guard gesture.state == .began,
@@ -229,6 +240,14 @@ struct MapContainerView: UIViewRepresentable {
             let point = gesture.location(in: map)
             let coord = map.convert(point, toCoordinateFrom: map)
             onLongPress?(coord)
+        }
+
+        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard tapEnabled, gesture.state == .ended,
+                  let map = gesture.view as? MKMapView else { return }
+            let point = gesture.location(in: map)
+            let coord = map.convert(point, toCoordinateFrom: map)
+            onTap?(coord)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
