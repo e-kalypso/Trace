@@ -39,7 +39,7 @@ struct MapContainerView: UIViewRepresentable {
     var following: Bool
     var revision: Int
     var personalWaypoints: [PersonalWaypointItem] = []
-    var onLongPress: ((CLLocationCoordinate2D) -> Void)?
+    var onLongPress: ((CLLocationCoordinate2D) -> Void)? = nil
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -208,7 +208,7 @@ struct MapContainerView: UIViewRepresentable {
         var appliedFitRequest = 0
         var wasFollowing = false
         var scrubAnnotation: ScrubAnnotation?
-        var onLongPress: ((CLLocationCoordinate2D) -> Void)?
+        var onLongPress: ((CLLocationCoordinate2D) -> Void)? = nil
 
         @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
             guard gesture.state == .began,

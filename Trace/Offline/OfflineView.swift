@@ -79,7 +79,7 @@ struct OfflineView: View {
                 }
             }
 
-            Section("Zones hors ligne") {
+            Section {
                 if packs.isEmpty {
                     Text("Aucune zone téléchargée.")
                         .foregroundStyle(.secondary)
@@ -98,6 +98,8 @@ struct OfflineView: View {
                         context.delete(packs[i])
                     }
                 }
+            } header: {
+                Text("Zones hors ligne")
             } footer: {
                 Text("Les traces, stats et le GPS fonctionnent toujours sans réseau. Les zones téléchargées rendent aussi la carte disponible (fonds topo/IGN/Swisstopo).")
             }

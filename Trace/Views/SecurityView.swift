@@ -43,13 +43,15 @@ struct SecurityView: View {
                 }
             }
 
-            Section("Urgences montagne") {
+            Section {
                 Link(destination: URL(string: "tel:112")!) {
                     Label("112 — Urgences européennes", systemImage: "phone.fill")
                 }
                 Link(destination: URL(string: "tel:+33450531689")!) {
                     Label("PGHM Chamonix", systemImage: "cross.case.fill")
                 }
+            } header: {
+                Text("Urgences montagne")
             } footer: {
                 Text("Hors réseau : l'iPhone 14+ permet SOS d'urgence par satellite (maintenez le bouton latéral + volume).")
             }

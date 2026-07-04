@@ -24,7 +24,7 @@ struct SettingsView: View {
                     Label("Zones hors ligne", systemImage: "arrow.down.circle")
                 }
             }
-            Section("Fond de carte") {
+            Section {
                 ForEach(Basemap.allCases) { b in
                     Button {
                         model.basemap = b
@@ -41,14 +41,18 @@ struct SettingsView: View {
                         }
                     }
                 }
+            } header: {
+                Text("Fond de carte")
             } footer: {
-                Text("OpenTopoMap couvre la France, la Suisse et l'Italie de façon homogène — idéal pour le Tour du Mont-Blanc. Fonds IGN et Swisstopo : prochaine version.")
+                Text("OpenTopoMap couvre la France, la Suisse et l'Italie de façon homogène — idéal pour le Tour du Mont-Blanc. Plan IGN et Swisstopo sont les fonds officiels de chaque pays.")
             }
 
-            Section("GPS") {
+            Section {
                 Toggle(isOn: $model.balancedGPS) {
                     Label("Économie de batterie", systemImage: "battery.75percent")
                 }
+            } header: {
+                Text("GPS")
             } footer: {
                 Text("Espace les mesures GPS (~15 m) pendant le suivi. Recommandé pour les sorties de plusieurs heures.")
             }
@@ -74,9 +78,11 @@ struct SettingsView: View {
                 }
             }
 
-            Section("À propos") {
+            Section {
                 LabeledContent("Version", value: "3.0")
-                LabeledContent("Cartes", value: "Apple Maps · OpenTopoMap")
+                LabeledContent("Cartes", value: "Apple · OpenTopoMap · IGN · Swisstopo")
+            } header: {
+                Text("À propos")
             } footer: {
                 Text("Vos traces restent sur votre appareil. Seuls les fonds de carte et la météo transitent par le réseau.")
             }
