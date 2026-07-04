@@ -1,54 +1,42 @@
 # ============================================================
-# Cloud Mac build for Trace's iOS app (Capacitor).
+# Build cloud Mac — Trace v3, app native SwiftUI.
+# Le projet Xcode est GÉNÉRÉ par XcodeGen depuis project.yml
+# (rien de fragile commité), puis signé et envoyé sur TestFlight.
 #
-# Manual code signing: upload BOTH files in the Codemagic UI
-# (Team settings -> Code signing identities):
-#   - iOS certificate: ios_distribution.p12  (password: TracePwd2026)
-#   - iOS provisioning profile: the .mobileprovision you create in the
-#     Apple Developer portal (App Store, bundle id app.trace.gpx).
-# The ios_signing block below then applies them — no scripts guess anything.
+# Signature (déjà en place dans Codemagic, NE PAS TOUCHER) :
+#   - certificat généré par Codemagic (Code signing identities)
+#   - profil "Trace Prod" uploadé, bundle app.trace.gpx
+#   - intégration App Store Connect : TRACE_APP_STORE_KEY
 # ============================================================
 workflows:
-  ios-capacitor:
-    name: Trace iOS (Capacitor)
+  ios-native:
+    name: Trace iOS (SwiftUI)
     instance_type: mac_mini_m2
-    max_build_duration: 60
+    max_build_duration: 45
     integrations:
       app_store_connect: TRACE_APP_STORE_KEY
     environment:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: app.trace.gpx
-      node: 20.14.0
       xcode: latest
-      cocoapods: default
-      vars:
-        XCODE_WORKSPACE: "App.xcworkspace"
-        XCODE_SCHEME: "App"
     scripts:
-      - name: Install web dependencies
-        script: npm ci
-      - name: Build web app + sync to iOS
+      - name: Générer le projet Xcode (XcodeGen)
         script: |
-          npm run build
-          npx cap sync ios
-      - name: Install CocoaPods dependencies
+          which xcodegen || brew install xcodegen
+          xcodegen generate
+      - name: Numéro de build unique (exigé par TestFlight)
         script: |
-          cd ios/App && pod install
-      - name: Apply the uploaded signing files to the Xcode project
+          agvtool new-version -all $BUILD_NUMBER
+      - name: Appliquer la signature au projet
         script: |
           xcode-project use-profiles
-      - name: Build signed IPA
+      - name: Build IPA signé
         script: |
-          cd ios/App
-          # numero de build unique exige par TestFlight a chaque envoi
-          agvtool new-version -all $BUILD_NUMBER
           xcode-project build-ipa \
-            --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME"
+            --project Trace.xcodeproj \
+            --scheme Trace
     artifacts:
-      # build-ipa runs from ios/App, so the .ipa lands under ios/App/build/
-      - ios/App/build/ios/ipa/*.ipa
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
     publishing:
