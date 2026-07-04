@@ -3,6 +3,7 @@
 //  Suivre, et les éditions (inverser, simplifier, lisser, couleur…).
 
 import SwiftData
+import UIKit
 import SwiftUI
 
 struct TrackDetailView: View {
@@ -44,6 +45,19 @@ struct TrackDetailView: View {
                     .buttonStyle(.borderedProminent)
                     .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                     .listRowBackground(Color.clear)
+                }
+
+                Section {
+                    NavigationLink {
+                        PlanView(record: record)
+                    } label: {
+                        Label("Planifier (horaires, météo, nuit)", systemImage: "calendar.badge.clock")
+                    }
+                    NavigationLink {
+                        OfflineView(record: record)
+                    } label: {
+                        Label("Télécharger la zone hors ligne", systemImage: "arrow.down.circle")
+                    }
                 }
 
                 Section("Couleur") {

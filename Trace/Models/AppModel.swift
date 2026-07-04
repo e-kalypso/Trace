@@ -5,12 +5,22 @@
 import CoreLocation
 import Foundation
 import SwiftUI
+import UIKit
+
+/// Fond raster tuilé (affiché via CachingTileOverlay, donc hors-ligne-able).
+struct RasterProvider {
+    let id: String
+    let urlTemplate: String
+    let maxZ: Int
+}
 
 enum Basemap: String, CaseIterable, Identifiable {
     case appleStandard
     case appleHybrid
     case appleSatellite
     case openTopo
+    case ignPlan
+    case swisstopo
 
     var id: String { rawValue }
 
@@ -20,6 +30,8 @@ enum Basemap: String, CaseIterable, Identifiable {
         case .appleHybrid: return "Hybride (Apple)"
         case .appleSatellite: return "Satellite (Apple)"
         case .openTopo: return "Topo (OpenTopoMap)"
+        case .ignPlan: return "Plan IGN (France)"
+        case .swisstopo: return "Swisstopo (Suisse)"
         }
     }
 
@@ -29,8 +41,41 @@ enum Basemap: String, CaseIterable, Identifiable {
         case .appleHybrid: return "map.fill"
         case .appleSatellite: return "globe.europe.africa.fill"
         case .openTopo: return "mountain.2.fill"
+        case .ignPlan: return "signpost.right.fill"
+        case .swisstopo: return "mountain.2.circle.fill"
         }
     }
+
+    /// nil pour les fonds Apple (vectoriels natifs, non tuilables).
+    var raster: RasterProvider? {
+        switch self {
+        case .openTopo:
+            return RasterProvider(
+                id: "opentopo",
+                urlTemplate: "https://a.tile.opentopomap.org/{z}/{x}/{y}.png",
+                maxZ: 16)
+        case .ignPlan:
+            return RasterProvider(
+                id: "ignplan",
+                urlTemplate:
+                    "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0"
+                    + "&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM"
+                    + "&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image%2Fpng",
+                maxZ: 18)
+        case .swisstopo:
+            return RasterProvider(
+                id: "swisstopo",
+                urlTemplate:
+                    "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe"
+                    + "/default/current/3857/{z}/{x}/{y}.jpeg",
+                maxZ: 18)
+        default:
+            return nil
+        }
+    }
+
+    /// Fonds téléchargeables hors ligne (rasters uniquement).
+    static var offlineCapable: [Basemap] { allCases.filter { $0.raster != nil } }
 }
 
 /// Une trace prête à dessiner sur la carte.
@@ -127,6 +172,24 @@ final class AppModel: ObservableObject {
         follow = nil
         location.stop()
         // on garde l'affichage de position si l'utilisateur relance « ma position »
+    }
+
+    // MARK: enregistrement de sortie
+
+    @Published var recording: RecordingSession?
+
+    func startRecording() {
+        recording = RecordingSession()
+        location.setBalancedAccuracy(balancedGPS)
+        location.start(background: true)
+    }
+
+    /// Termine et renvoie les points capturés (à sauvegarder par l'appelant).
+    func stopRecording() -> [TrackPoint] {
+        let pts = recording?.finish() ?? []
+        recording = nil
+        if follow == nil { location.stop() }
+        return pts
     }
 }
 

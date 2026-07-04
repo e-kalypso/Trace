@@ -17,6 +17,19 @@ final class ColoredPolyline: MKPolyline {
 final class WaypointAnnotation: MKPointAnnotation {}
 final class ScrubAnnotation: MKPointAnnotation {}
 
+/// Waypoint personnel (appui long) — porte son symbole SF.
+final class PersonalAnnotation: MKPointAnnotation {
+    var symbolName = "mappin"
+}
+
+struct PersonalWaypointItem {
+    let id: UUID
+    let lat: Double
+    let lon: Double
+    let name: String
+    let symbol: String
+}
+
 struct MapContainerView: UIViewRepresentable {
     var tracks: [MapTrack]
     var basemap: Basemap
@@ -25,10 +38,18 @@ struct MapContainerView: UIViewRepresentable {
     var fitRequest: Int
     var following: Bool
     var revision: Int
+    var personalWaypoints: [PersonalWaypointItem] = []
+    var onLongPress: ((CLLocationCoordinate2D) -> Void)?
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
         map.delegate = context.coordinator
+        context.coordinator.onLongPress = onLongPress
+        let press = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleLongPress(_:)))
+        press.minimumPressDuration = 0.5
+        map.addGestureRecognizer(press)
         map.showsUserLocation = true
         map.showsCompass = true
         map.showsScale = true
@@ -94,6 +115,23 @@ struct MapContainerView: UIViewRepresentable {
             map.setUserTrackingMode(following ? .follow : .none, animated: true)
         }
 
+        // --- waypoints personnels ---
+        let wpKey = personalWaypoints.map { $0.id.uuidString }.joined(separator: ",")
+        if coord.appliedWaypointsKey != wpKey {
+            coord.appliedWaypointsKey = wpKey
+            map.removeAnnotations(map.annotations.filter { $0 is PersonalAnnotation })
+            for w in personalWaypoints {
+                let a = PersonalAnnotation()
+                a.coordinate = CLLocationCoordinate2D(latitude: w.lat, longitude: w.lon)
+                a.title = w.name
+                a.symbolName = w.symbol
+                map.addAnnotation(a)
+            }
+        }
+
+        // --- rappel du callback (closure capturée à jour) ---
+        coord.onLongPress = onLongPress
+
         // --- curseur de scrub ---
         if let s = scrub {
             if let a = coord.scrubAnnotation {
@@ -112,6 +150,18 @@ struct MapContainerView: UIViewRepresentable {
 
     private func applyBasemap(on map: MKMapView) {
         map.removeOverlays(map.overlays.filter { $0 is MKTileOverlay })
+        if let raster = basemap.raster {
+            let c = MKStandardMapConfiguration()
+            c.pointOfInterestFilter = .excludingAll
+            map.preferredConfiguration = c
+            let tiles = CachingTileOverlay(providerID: raster.id,
+                                           urlTemplate: raster.urlTemplate)
+            tiles.canReplaceMapContent = true
+            tiles.maximumZ = raster.maxZ
+            // niveau .aboveRoads : sous les polylignes (qui sont en .aboveLabels)
+            map.addOverlay(tiles, level: .aboveRoads)
+            return
+        }
         switch basemap {
         case .appleStandard:
             let c = MKStandardMapConfiguration(elevationStyle: .realistic)
@@ -121,16 +171,8 @@ struct MapContainerView: UIViewRepresentable {
             map.preferredConfiguration = MKHybridMapConfiguration(elevationStyle: .realistic)
         case .appleSatellite:
             map.preferredConfiguration = MKImageryMapConfiguration(elevationStyle: .realistic)
-        case .openTopo:
-            let c = MKStandardMapConfiguration()
-            c.pointOfInterestFilter = .excludingAll
-            map.preferredConfiguration = c
-            let tiles = MKTileOverlay(
-                urlTemplate: "https://a.tile.opentopomap.org/{z}/{x}/{y}.png"
-            )
-            tiles.canReplaceMapContent = true
-            tiles.maximumZ = 16
-            map.insertOverlay(tiles, at: 0, level: .aboveLabels)
+        default:
+            break
         }
     }
 
@@ -162,9 +204,19 @@ struct MapContainerView: UIViewRepresentable {
     final class Coordinator: NSObject, MKMapViewDelegate {
         var appliedBasemap: Basemap?
         var appliedTracksKey = ""
+        var appliedWaypointsKey = ""
         var appliedFitRequest = 0
         var wasFollowing = false
         var scrubAnnotation: ScrubAnnotation?
+        var onLongPress: ((CLLocationCoordinate2D) -> Void)?
+
+        @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+            guard gesture.state == .began,
+                  let map = gesture.view as? MKMapView else { return }
+            let point = gesture.location(in: map)
+            let coord = map.convert(point, toCoordinateFrom: map)
+            onLongPress?(coord)
+        }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let tiles = overlay as? MKTileOverlay {
@@ -203,6 +255,16 @@ struct MapContainerView: UIViewRepresentable {
                 v.annotation = annotation
                 v.glyphImage = UIImage(systemName: "flag.fill")
                 v.markerTintColor = UIColor(hex: "E8663C")
+                v.canShowCallout = true
+                return v
+            }
+            if let personal = annotation as? PersonalAnnotation {
+                let id = "perso"
+                let v = (mapView.dequeueReusableAnnotationView(withIdentifier: id) as? MKMarkerAnnotationView)
+                    ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: id)
+                v.annotation = annotation
+                v.glyphImage = UIImage(systemName: personal.symbolName)
+                v.markerTintColor = UIColor(hex: "0A84FF")
                 v.canShowCallout = true
                 return v
             }

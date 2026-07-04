@@ -1,13 +1,29 @@
 //  SettingsView.swift
 //  Réglages : fond de carte, précision GPS (batterie), à propos.
 
+import SwiftData
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.modelContext) private var context
     @EnvironmentObject private var model: AppModel
+    @Query(sort: \WaypointRecord.createdAt, order: .reverse)
+    private var waypoints: [WaypointRecord]
 
     var body: some View {
         List {
+            Section {
+                NavigationLink {
+                    SecurityView(location: model.location)
+                } label: {
+                    Label("Sécurité (coordonnées secours)", systemImage: "cross.case.fill")
+                }
+                NavigationLink {
+                    OfflineView(record: nil)
+                } label: {
+                    Label("Zones hors ligne", systemImage: "arrow.down.circle")
+                }
+            }
             Section("Fond de carte") {
                 ForEach(Basemap.allCases) { b in
                     Button {
@@ -35,6 +51,27 @@ struct SettingsView: View {
                 }
             } footer: {
                 Text("Espace les mesures GPS (~15 m) pendant le suivi. Recommandé pour les sorties de plusieurs heures.")
+            }
+
+            if !waypoints.isEmpty {
+                Section("Mes repères") {
+                    ForEach(waypoints) { w in
+                        HStack {
+                            Image(systemName: w.category.symbol)
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(w.name)
+                                Text(String(format: "%.4f, %.4f", w.lat, w.lon))
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .onDelete { offsets in
+                        for i in offsets { context.delete(waypoints[i]) }
+                    }
+                }
             }
 
             Section("À propos") {

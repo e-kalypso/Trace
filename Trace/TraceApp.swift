@@ -13,6 +13,6 @@ struct TraceApp: App {
             ContentView()
                 .environmentObject(model)
         }
-        .modelContainer(for: TrackRecord.self)
+        .modelContainer(for: [TrackRecord.self, OfflinePackRecord.self, WaypointRecord.self])
     }
 }

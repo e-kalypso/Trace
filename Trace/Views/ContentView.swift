@@ -5,6 +5,7 @@
 import CoreLocation
 import SwiftData
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct ContentView: View {
@@ -12,12 +13,18 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @Query(sort: \TrackRecord.sortOrder) private var records: [TrackRecord]
 
+    @Query(sort: \WaypointRecord.createdAt) private var waypoints: [WaypointRecord]
+
     @State private var selectedUUID: UUID?
     @State private var detent: PresentationDetent = .medium
     @State private var showImporter = false
     @State private var pendingImport: PendingImport?
     @State private var toast: String?
     @State private var locatePending = false
+    @State private var newWaypointCoord: CLLocationCoordinate2D?
+    @State private var showSaveRecording = false
+    @State private var recordingName = ""
+    @State private var recordedPoints: [TrackPoint] = []
 
     private var gpxType: UTType {
         UTType(filenameExtension: "gpx") ?? .xml
@@ -31,32 +38,63 @@ struct ContentView: View {
                 scrub: model.scrubCoordinate,
                 fitTarget: model.fitTarget,
                 fitRequest: model.fitRequest,
-                following: model.follow != nil,
-                revision: model.mapRevision
+                following: model.follow != nil || model.recording != nil,
+                revision: model.mapRevision,
+                personalWaypoints: waypoints.map {
+                    PersonalWaypointItem(id: $0.uuid, lat: $0.lat, lon: $0.lon,
+                                         name: $0.name, symbol: $0.category.symbol)
+                },
+                onLongPress: { coord in
+                    if model.follow == nil { newWaypointCoord = coord }
+                }
             )
             .ignoresSafeArea()
 
-            // HUD de suivi
+            // HUD d'enregistrement (sous-vue observante : stats vivantes)
+            if let rec = model.recording {
+                RecordingHUDView(rec: rec, location: model.location) {
+                    recordedPoints = model.stopRecording()
+                    if recordedPoints.count >= 2 {
+                        recordingName = "Sortie du \(Date().formatted(date: .abbreviated, time: .omitted))"
+                        showSaveRecording = true
+                    }
+                }
+            }
+
+            // HUD de suivi (sous-vue observante)
             if let follow = model.follow {
-                followHUD(follow)
-            } else {
-                // bouton « ma position » flottant
-                VStack {
+                FollowHUDView(follow: follow, location: model.location) {
+                    model.stopFollow()
+                }
+            } else if model.recording == nil {
+                // boutons flottants : ma position + enregistrer
+                VStack(spacing: 10) {
                     HStack {
                         Spacer()
-                        Button {
-                            locatePending = true
-                            model.location.setBalancedAccuracy(model.balancedGPS)
-                            model.location.start(background: false)
-                            if let fix = model.location.fix {
-                                model.requestFit([fix.coordinate])
-                                locatePending = false
+                        VStack(spacing: 10) {
+                            Button {
+                                locatePending = true
+                                model.location.setBalancedAccuracy(model.balancedGPS)
+                                model.location.start(background: false)
+                                if let fix = model.location.fix {
+                                    model.requestFit([fix.coordinate])
+                                    locatePending = false
+                                }
+                            } label: {
+                                Image(systemName: "location.fill")
+                                    .font(.body.weight(.semibold))
+                                    .frame(width: 44, height: 44)
+                                    .background(.regularMaterial, in: Circle())
                             }
-                        } label: {
-                            Image(systemName: "location.fill")
-                                .font(.body.weight(.semibold))
-                                .frame(width: 44, height: 44)
-                                .background(.regularMaterial, in: Circle())
+                            Button {
+                                model.startRecording()
+                            } label: {
+                                Image(systemName: "record.circle")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(.red)
+                                    .frame(width: 44, height: 44)
+                                    .background(.regularMaterial, in: Circle())
+                            }
                         }
                         .padding(.trailing, 12)
                         .padding(.top, 56)
@@ -78,9 +116,9 @@ struct ContentView: View {
                 .transition(.opacity)
             }
         }
-        // Feuille principale, toujours présente hors suivi (pattern Plans)
+        // Feuille principale, toujours présente hors suivi/enregistrement
         .sheet(isPresented: .init(
-            get: { model.follow == nil },
+            get: { model.follow == nil && model.recording == nil },
             set: { _ in }
         )) {
             NavigationStack {
@@ -122,88 +160,58 @@ struct ContentView: View {
         .onOpenURL { url in
             handleIncoming(url: url)
         }
-        // le suivi consomme chaque fix GPS
+        // le suivi et l'enregistrement consomment chaque fix GPS
         .onReceive(model.location.$fix) { fix in
             guard let fix else { return }
             model.follow?.update(with: fix)
+            model.recording?.add(fix: fix)
             if locatePending {
                 locatePending = false
                 model.requestFit([fix.coordinate])
             }
         }
-    }
-
-    // MARK: HUD de suivi
-
-    @ViewBuilder
-    private func followHUD(_ follow: FollowSession) -> some View {
-        let st = follow.state
-        VStack {
-            // bannière haute
-            HStack(spacing: 12) {
-                Image(systemName: st.offRoute
-                      ? "exclamationmark.triangle.fill"
-                      : "location.north.line.fill")
-                    .font(.title2)
-                    .foregroundStyle(st.offRoute ? .orange : Color.accentColor)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(st.offRoute ? "Hors trace" : follow.trackName)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(st.offRoute
-                         ? "à \(Int(st.offset)) m du tracé"
-                         : "encore \(Fmt.distance(st.remaining))")
-                        .font(.footnote.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                gpsBadge
-            }
-            .padding(14)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
-            .padding(.horizontal, 12)
-
-            Spacer()
-
-            // barre basse : stats + stop
-            HStack(spacing: 0) {
-                hudStat(Fmt.distance(st.remaining), "restant")
-                hudStat(st.etaSeconds.map { Fmt.clock(after: $0) } ?? "—", "arrivée")
-                hudStat(model.location.fix.map { "\(Int($0.altitude)) m" } ?? "—", "altitude")
-                Button {
-                    model.stopFollow()
-                } label: {
-                    Text("Arrêter")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background(.red, in: Capsule())
-                        .foregroundStyle(.white)
+        // nouveau waypoint (appui long)
+        .sheet(isPresented: .init(
+            get: { newWaypointCoord != nil },
+            set: { if !$0 { newWaypointCoord = nil } }
+        )) {
+            if let coord = newWaypointCoord {
+                NewWaypointSheet(coordinate: coord,
+                                 altitude: model.location.fix?.altitude) {
+                    newWaypointCoord = nil
                 }
             }
-            .padding(12)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
+        }
+        // sauvegarde de l'enregistrement
+        .alert("Enregistrer la sortie", isPresented: $showSaveRecording) {
+            TextField("Nom", text: $recordingName)
+            Button("Ignorer", role: .cancel) { recordedPoints = [] }
+            Button("Enregistrer") { saveRecording() }
+        } message: {
+            Text("\(Fmt.distance(recordedPoints.last?.dist ?? 0)) parcourus")
         }
     }
 
-    private var gpsBadge: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "antenna.radiowaves.left.and.right")
-            Text(model.location.quality.rawValue)
+    private func saveRecording() {
+        let name = recordingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard recordedPoints.count >= 2, !name.isEmpty else { return }
+        let uuid = UUID()
+        let gpx = GPXWriter.gpx(name: name, points: recordedPoints, waypoints: [])
+        do {
+            try GPXStore.save(gpx, for: uuid)
+            let stats = TrackGeometry.stats(for: recordedPoints)
+            context.insert(TrackRecord(
+                uuid: uuid, name: name,
+                colorHex: TrackPalette.hex(at: records.count),
+                sortOrder: records.count,
+                distance: stats.distance, ascent: stats.ascent, descent: stats.descent))
+            flash("Sortie enregistrée ✓")
+        } catch {
+            flash("Impossible d'enregistrer la sortie")
         }
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(model.location.quality == .poor ? .orange : .secondary)
+        recordedPoints = []
     }
 
-    private func hudStat(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 1) {
-            Text(value).font(.subheadline.monospacedDigit().weight(.bold))
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
 
     // MARK: import
 
@@ -288,6 +296,140 @@ struct ContentView: View {
         withAnimation { toast = message }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             withAnimation { if toast == message { toast = nil } }
+        }
+    }
+}
+
+// MARK: - HUDs observants (stats vivantes pendant suivi / enregistrement)
+
+private struct HUDStat: View {
+    let value: String
+    let label: String
+    var body: some View {
+        VStack(spacing: 1) {
+            Text(value).font(.subheadline.monospacedDigit().weight(.bold))
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct GPSBadge: View {
+    @ObservedObject var location: LocationManager
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+            Text(location.quality.rawValue)
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(location.quality == .poor ? .orange : .secondary)
+    }
+}
+
+struct FollowHUDView: View {
+    @ObservedObject var follow: FollowSession
+    @ObservedObject var location: LocationManager
+    var onStop: () -> Void
+
+    var body: some View {
+        let st = follow.state
+        VStack {
+            HStack(spacing: 12) {
+                Image(systemName: st.offRoute
+                      ? "exclamationmark.triangle.fill"
+                      : "location.north.line.fill")
+                    .font(.title2)
+                    .foregroundStyle(st.offRoute ? .orange : Color.accentColor)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(st.offRoute ? "Hors trace" : follow.trackName)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(st.offRoute
+                         ? "à \(Int(st.offset)) m du tracé"
+                         : "encore \(Fmt.distance(st.remaining))")
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                GPSBadge(location: location)
+            }
+            .padding(14)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .padding(.horizontal, 12)
+
+            Spacer()
+
+            HStack(spacing: 0) {
+                HUDStat(value: Fmt.distance(st.remaining), label: "restant")
+                HUDStat(value: st.etaSeconds.map { Fmt.clock(after: $0) } ?? "—",
+                        label: "arrivée")
+                HUDStat(value: location.fix.map { "\(Int($0.altitude)) m" } ?? "—",
+                        label: "altitude")
+                Button(action: onStop) {
+                    Text("Arrêter")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(.red, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+            }
+            .padding(12)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
+        }
+    }
+}
+
+struct RecordingHUDView: View {
+    @ObservedObject var rec: RecordingSession
+    @ObservedObject var location: LocationManager
+    var onFinish: () -> Void
+
+    var body: some View {
+        VStack {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(.red)
+                    .frame(width: 10, height: 10)
+                    .opacity(rec.isPaused ? 0.3 : 1)
+                Text(rec.isPaused ? "En pause" : "Enregistrement")
+                    .font(.headline)
+                Spacer()
+                GPSBadge(location: location)
+            }
+            .padding(14)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .padding(.horizontal, 12)
+
+            Spacer()
+
+            HStack(spacing: 0) {
+                HUDStat(value: Fmt.distance(rec.distance), label: "distance")
+                HUDStat(value: "+\(Int(rec.ascent)) m", label: "D+")
+                HUDStat(value: Fmt.duration(rec.elapsed), label: "durée")
+                Button {
+                    rec.togglePause()
+                } label: {
+                    Image(systemName: rec.isPaused ? "play.fill" : "pause.fill")
+                        .frame(width: 40, height: 40)
+                        .background(.thinMaterial, in: Circle())
+                }
+                Button(action: onFinish) {
+                    Text("Terminer")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.red, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+                .padding(.leading, 6)
+            }
+            .padding(12)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
         }
     }
 }
