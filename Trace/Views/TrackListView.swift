@@ -58,6 +58,9 @@ struct TrackListView: View {
                 NavigationLink(value: "history") {
                     Label("Carnet de randonnées", systemImage: "book.closed.fill")
                 }
+                NavigationLink(value: "weather") {
+                    Label("Météo ici (12 h)", systemImage: "cloud.sun.fill")
+                }
             }
 
             if records.isEmpty {
@@ -135,7 +138,21 @@ struct TrackListView: View {
             }
             ToolbarItem(placement: .topBarTrailing) { EditButton() }
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: onImportTap) {
+                Menu {
+                    Button(action: onImportTap) {
+                        Label("Importer des fichiers GPX", systemImage: "square.and.arrow.down")
+                    }
+                    Button {
+                        model.startBuilder()
+                    } label: {
+                        Label("Créer un itinéraire sur la carte", systemImage: "pencil.and.outline")
+                    }
+                    Button {
+                        model.startRecording()
+                    } label: {
+                        Label("Enregistrer une sortie (GPS)", systemImage: "record.circle")
+                    }
+                } label: {
                     Image(systemName: "plus")
                 }
             }

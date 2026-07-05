@@ -30,6 +30,7 @@ final class HikeLogRecord {
 
 struct HistoryView: View {
     @Environment(\.modelContext) private var context
+    @EnvironmentObject private var model: AppModel
     @Query(sort: \HikeLogRecord.date, order: .reverse)
     private var logs: [HikeLogRecord]
 
@@ -67,7 +68,7 @@ struct HistoryView: View {
                                 .background(Color.accentColor.opacity(0.15),
                                             in: Capsule())
                         }
-                        Text("\(log.date.formatted(date: .abbreviated, time: .shortened)) · \(Fmt.distance(log.distance)) · +\(Int(log.ascent)) m · \(Fmt.duration(log.duration))")
+                        Text("\(log.date.formatted(date: .abbreviated, time: .shortened)) · \(Fmt.distance(log.distance)) · +\(Int(log.ascent)) m · \(Fmt.duration(log.duration)) · \(Fmt.kcal(weightKg: model.weightKg, distanceM: log.distance, ascent: log.ascent))")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }

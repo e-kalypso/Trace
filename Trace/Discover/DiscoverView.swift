@@ -37,15 +37,15 @@ enum Overpass {
     static func hikingRoutes(lat: Double, lon: Double,
                              radiusKm: Double) async throws -> [DiscoveredRoute] {
         let query = """
-        [out:json][timeout:25];
+        [out:json][timeout:\(radiusKm > 30 ? 50 : 25)];
         relation["route"="hiking"](around:\(Int(radiusKm * 1000)),\(lat),\(lon));
-        out tags geom 40;
+        out tags geom \(radiusKm > 30 ? 80 : 40);
         """
         var req = URLRequest(url: URL(string: "https://overpass-api.de/api/interpreter")!)
         req.httpMethod = "POST"
         req.httpBody = "data=\(query.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? query)"
             .data(using: .utf8)
-        req.timeoutInterval = 30
+        req.timeoutInterval = radiusKm > 30 ? 55 : 30
         let (data, _) = try await URLSession.shared.data(for: req)
         let resp = try JSONDecoder().decode(Response.self, from: data)
 
@@ -82,9 +82,26 @@ struct DiscoverView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var importedIDs: Set<Int> = []
+    @State private var radiusKm = 15.0
 
     var body: some View {
         List {
+            Section {
+                Picker("Rayon de recherche", selection: $radiusKm) {
+                    Text("5 km").tag(5.0)
+                    Text("15 km").tag(15.0)
+                    Text("50 km").tag(50.0)
+                    Text("100 km").tag(100.0)
+                }
+                .pickerStyle(.segmented)
+                Button {
+                    Task { await load() }
+                } label: {
+                    Label("Chercher dans ce rayon", systemImage: "location.magnifyingglass")
+                }
+                .disabled(loading)
+            }
+
             Section {
                 if loading {
                     HStack {
@@ -95,12 +112,6 @@ struct DiscoverView: View {
                 } else if let error {
                     Label(error, systemImage: "wifi.slash")
                         .font(.footnote).foregroundStyle(.secondary)
-                } else if routes.isEmpty {
-                    Button {
-                        Task { await load() }
-                    } label: {
-                        Label("Chercher autour de moi", systemImage: "location.magnifyingglass")
-                    }
                 }
                 ForEach(routes) { r in
                     HStack(spacing: 12) {
@@ -150,8 +161,8 @@ struct DiscoverView: View {
             routes = try await Overpass.hikingRoutes(
                 lat: fix.coordinate.latitude,
                 lon: fix.coordinate.longitude,
-                radiusKm: 15)
-            if routes.isEmpty { error = "Aucun itinéraire balisé trouvé à moins de 15 km." }
+                radiusKm: radiusKm)
+            if routes.isEmpty { error = "Aucun itinéraire balisé trouvé dans ce rayon." }
         } catch {
             self.error = "Réseau indisponible — réessayez plus tard."
         }

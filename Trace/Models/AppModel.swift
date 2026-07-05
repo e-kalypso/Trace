@@ -100,12 +100,20 @@ final class AppModel: ObservableObject {
     @Published var nightMode: Bool {
         didSet { UserDefaults.standard.set(nightMode, forKey: "nightMode") }
     }
+    /// Poids (kg) pour l'estimation des calories.
+    @Published var weightKg: Double {
+        didSet { UserDefaults.standard.set(weightKg, forKey: "weightKg") }
+    }
+    /// Pendant un suivi : caméra libérée pour voir toute la trace.
+    @Published var followOverview = false
 
     init() {
         basemap = Basemap(rawValue: UserDefaults.standard.string(forKey: "basemap") ?? "")
             ?? .appleStandard
         balancedGPS = UserDefaults.standard.bool(forKey: "balancedGPS")
         nightMode = UserDefaults.standard.bool(forKey: "nightMode")
+        let w = UserDefaults.standard.double(forKey: "weightKg")
+        weightKg = w > 0 ? w : 70
     }
 
     /// Cache uuid → trace parsée (le fichier .gpx reste la source de vérité).
@@ -173,6 +181,7 @@ final class AppModel: ObservableObject {
 
     /// Variante générique (enchaînement d'étapes, trace combinée…).
     func startFollow(points: [TrackPoint], name: String, waypoints: [Waypoint]) {
+        followOverview = false
         follow = FollowSession(points: points, name: name, waypoints: waypoints)
         location.setBalancedAccuracy(balancedGPS)
         location.start(background: true)
@@ -181,6 +190,7 @@ final class AppModel: ObservableObject {
 
     func stopFollow() {
         follow = nil
+        followOverview = false
         if recording == nil { location.stop() }
         UIApplication.shared.isIdleTimerDisabled = (recording != nil)
     }
@@ -280,6 +290,11 @@ enum Fmt {
         let h = Int(s) / 3600
         let m = (Int(s) % 3600) / 60
         return h > 0 ? "\(h) h \(String(format: "%02d", m))" : "\(m) min"
+    }
+    /// Estimation calories marche montagne (plat + grimpe, rendement ~20 %).
+    static func kcal(weightKg: Double, distanceM: Double, ascent: Double) -> String {
+        let v = weightKg * (distanceM / 1000) * 0.78 + weightKg * ascent * 0.0117
+        return "≈\(Int(v)) kcal"
     }
     static func clock(after seconds: Double) -> String {
         let d = Date().addingTimeInterval(seconds)

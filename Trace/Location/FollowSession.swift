@@ -19,6 +19,8 @@ final class FollowSession: ObservableObject {
         var progress: Double = 0            // 0…1
         var nextWaypointName: String?
         var nextWaypointIn: Double?         // m le long de la trace
+        var remainingAscent: Double = 0     // D+ encore à grimper
+        var upcomingGrade: Double?          // % de pente sur ~100 m devant
     }
 
     @Published var state = State()
@@ -35,6 +37,9 @@ final class FollowSession: ObservableObject {
 
     /// Waypoints du GPX projetés sur la trace (nom, distance cumulée).
     private let routeWaypoints: [(name: String, dist: Double)]
+    /// D+ cumulé à chaque indice de point (pour le D+ restant).
+    private let cumAscent: [Double]
+    private let totalAscent: Double
     private var notifiedWaypoints: Set<Int> = []
 
     static let offRouteThreshold: Double = 45      // m
@@ -54,6 +59,23 @@ final class FollowSession: ObservableObject {
                 return (w.name, s.dist)
             }
             .sorted { $0.dist < $1.dist }
+
+        // D+ cumulé point par point (même seuil anti-bruit que les stats)
+        var cum: [Double] = []
+        cum.reserveCapacity(points.count)
+        var acc = 0.0
+        var lastEle: Double?
+        for p in points {
+            if let e = p.ele {
+                if let l = lastEle, e - l > 2 { acc += e - l; lastEle = e }
+                else if let l = lastEle, e - l < -2 { lastEle = e }
+                else if lastEle == nil { lastEle = e }
+            }
+            cum.append(acc)
+        }
+        self.cumAscent = cum
+        self.totalAscent = acc
+
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
@@ -92,6 +114,20 @@ final class FollowSession: ObservableObject {
         }
 
         s.progress = total > 0 ? s.done / total : 0
+
+        // D+ restant + pente à venir (~100 m devant)
+        let idx = min(snap.segIdx, cumAscent.count - 1)
+        if idx >= 0 && !cumAscent.isEmpty {
+            s.remainingAscent = max(0, totalAscent - cumAscent[idx])
+        }
+        var j = snap.segIdx
+        while j < points.count - 1 && points[j].dist - snap.dist < 100 { j += 1 }
+        if j > snap.segIdx, j < points.count,
+           let e1 = points[min(snap.segIdx, points.count - 1)].ele,
+           let e2 = points[j].ele {
+            let dd = points[j].dist - snap.dist
+            if dd > 20 { s.upcomingGrade = (e2 - e1) / dd * 100 }
+        }
 
         // prochain waypoint devant nous + alerte d'approche
         for (i, wp) in routeWaypoints.enumerated() where wp.dist > s.done {

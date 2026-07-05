@@ -56,7 +56,8 @@ struct ContentView: View {
                 scrub: model.scrubCoordinate,
                 fitTarget: model.fitTarget,
                 fitRequest: model.fitRequest,
-                following: model.follow != nil || model.recording != nil,
+                following: (model.follow != nil || model.recording != nil)
+                    && !model.followOverview,
                 revision: model.mapRevision &+ builderTick,
                 personalWaypoints: waypoints.map {
                     PersonalWaypointItem(id: $0.uuid, lat: $0.lat, lon: $0.lon,
@@ -80,7 +81,8 @@ struct ContentView: View {
 
             // HUD d'enregistrement (sous-vue observante : stats vivantes)
             if let rec = model.recording {
-                RecordingHUDView(rec: rec, location: model.location) {
+                RecordingHUDView(rec: rec, location: model.location,
+                                 weightKg: model.weightKg) {
                     recordedPoints = model.stopRecording()
                     if recordedPoints.count >= 2 {
                         recordingName = "Sortie du \(Date().formatted(date: .abbreviated, time: .omitted))"
@@ -111,18 +113,37 @@ struct ContentView: View {
 
             // HUD de suivi (sous-vue observante)
             if let follow = model.follow {
-                FollowHUDView(follow: follow, location: model.location) {
-                    // consigne la sortie au carnet si on a vraiment marché
-                    if follow.state.progress > 0.3 {
-                        context.insert(HikeLogRecord(
-                            name: follow.trackName,
-                            distance: follow.state.done,
-                            ascent: 0,
-                            duration: Date().timeIntervalSince(follow.startedAt),
-                            kind: "Suivie"))
+                FollowHUDView(
+                    follow: follow,
+                    location: model.location,
+                    overviewOn: model.followOverview,
+                    onOverview: {
+                        model.followOverview.toggle()
+                        if model.followOverview {
+                            model.requestFit(follow.points.map {
+                                .init(latitude: $0.lat, longitude: $0.lon)
+                            })
+                        }
+                    },
+                    onUTurn: {
+                        let reversedPts = TrackGeometry.reversed(follow.points)
+                        model.startFollow(points: reversedPts,
+                                          name: "\(follow.trackName) (retour)",
+                                          waypoints: [])
+                    },
+                    onStop: {
+                        // consigne la sortie au carnet si on a vraiment marché
+                        if follow.state.progress > 0.3 {
+                            context.insert(HikeLogRecord(
+                                name: follow.trackName,
+                                distance: follow.state.done,
+                                ascent: 0,
+                                duration: Date().timeIntervalSince(follow.startedAt),
+                                kind: "Suivie"))
+                        }
+                        model.stopFollow()
                     }
-                    model.stopFollow()
-                }
+                )
             } else if model.recording == nil && model.builder == nil {
                 // boutons flottants — sous la boussole MapKit (fix offset)
                 VStack(spacing: 10) {
@@ -230,6 +251,7 @@ struct ContentView: View {
                     case "discover": DiscoverView()
                     case "sequence": SequenceView()
                     case "history": HistoryView()
+                    case "weather": WeatherNowView()
                     default: EmptyView()
                     }
                 }
@@ -473,7 +495,24 @@ private struct GPSBadge: View {
 struct FollowHUDView: View {
     @ObservedObject var follow: FollowSession
     @ObservedObject var location: LocationManager
+    var overviewOn: Bool
+    var onOverview: () -> Void
+    var onUTurn: () -> Void
     var onStop: () -> Void
+
+    /// « Nuit dans X » — coucher du soleil à la position courante.
+    private var nightIn: String? {
+        guard let fix = location.fix,
+              let sunset = Sun.times(date: Date(),
+                                     lat: fix.coordinate.latitude,
+                                     lon: fix.coordinate.longitude).sunset,
+              sunset > Date() else { return nil }
+        let h = sunset.timeIntervalSinceNow / 3600
+        if h > 12 { return nil }
+        let hh = Int(h)
+        let mm = Int((h - Double(hh)) * 60)
+        return hh > 0 ? "nuit dans \(hh) h \(String(format: "%02d", mm))" : "nuit dans \(mm) min"
+    }
 
     var body: some View {
         let st = follow.state
@@ -488,20 +527,48 @@ struct FollowHUDView: View {
                     Text(st.offRoute ? "Hors trace" : follow.trackName)
                         .font(.headline)
                         .lineLimit(1)
-                    Text(st.offRoute
-                         ? "à \(Int(st.offset)) m du tracé"
-                         : "encore \(Fmt.distance(st.remaining))")
-                        .font(.footnote.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text(st.offRoute
+                             ? "à \(Int(st.offset)) m du tracé"
+                             : "encore \(Fmt.distance(st.remaining))")
+                        if let g = st.upcomingGrade, abs(g) >= 3 {
+                            Text(String(format: "%+.0f %%", g))
+                                .foregroundStyle(abs(g) > 15 ? .red : abs(g) > 8 ? .orange : .green)
+                        }
+                    }
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(.secondary)
                     if let wp = st.nextWaypointName, let d = st.nextWaypointIn {
                         Label("\(wp) dans \(Fmt.distance(d))", systemImage: "flag.fill")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(Color.accentColor)
                             .lineLimit(1)
                     }
+                    if let night = nightIn {
+                        Label(night, systemImage: "moon.fill")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
-                GPSBadge(location: location)
+                VStack(spacing: 8) {
+                    GPSBadge(location: location)
+                    HStack(spacing: 6) {
+                        Button(action: onOverview) {
+                            Image(systemName: overviewOn
+                                  ? "location.viewfinder" : "map")
+                                .font(.footnote.weight(.semibold))
+                                .frame(width: 30, height: 30)
+                                .background(.thinMaterial, in: Circle())
+                        }
+                        Button(action: onUTurn) {
+                            Image(systemName: "arrow.uturn.down")
+                                .font(.footnote.weight(.semibold))
+                                .frame(width: 30, height: 30)
+                                .background(.thinMaterial, in: Circle())
+                        }
+                    }
+                }
             }
             .padding(14)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
@@ -517,6 +584,7 @@ struct FollowHUDView: View {
 
             HStack(spacing: 0) {
                 HUDStat(value: Fmt.distance(st.remaining), label: "restant")
+                HUDStat(value: "+\(Int(st.remainingAscent)) m", label: "D+ restant")
                 HUDStat(value: st.etaSeconds.map { Fmt.clock(after: $0) } ?? "—",
                         label: "arrivée")
                 HUDStat(value: location.fix.map { "\(Int($0.altitude)) m" } ?? "—",
@@ -524,7 +592,7 @@ struct FollowHUDView: View {
                 Button(action: onStop) {
                     Text("Arrêter")
                         .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 18)
+                        .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(.red, in: Capsule())
                         .foregroundStyle(.white)
@@ -541,6 +609,7 @@ struct FollowHUDView: View {
 struct RecordingHUDView: View {
     @ObservedObject var rec: RecordingSession
     @ObservedObject var location: LocationManager
+    var weightKg: Double
     var onFinish: () -> Void
 
     var body: some View {
@@ -565,6 +634,10 @@ struct RecordingHUDView: View {
                 HUDStat(value: Fmt.distance(rec.distance), label: "distance")
                 HUDStat(value: "+\(Int(rec.ascent)) m", label: "D+")
                 HUDStat(value: Fmt.duration(rec.elapsed), label: "durée")
+                HUDStat(value: Fmt.kcal(weightKg: weightKg,
+                                        distanceM: rec.distance,
+                                        ascent: rec.ascent),
+                        label: "énergie")
                 Button {
                     rec.togglePause()
                 } label: {

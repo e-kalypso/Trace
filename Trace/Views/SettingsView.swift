@@ -54,6 +54,10 @@ struct SettingsView: View {
                 Toggle(isOn: $model.nightMode) {
                     Label("Mode nuit (vision nocturne)", systemImage: "moon.stars.fill")
                 }
+                Stepper(value: $model.weightKg, in: 35...150, step: 1) {
+                    Label("Poids : \(Int(model.weightKg)) kg (calories)",
+                          systemImage: "figure.walk")
+                }
             } header: {
                 Text("GPS et affichage")
             } footer: {
@@ -73,6 +77,14 @@ struct SettingsView: View {
                                     .font(.caption2.monospacedDigit())
                                     .foregroundStyle(.secondary)
                             }
+                            Spacer()
+                            Button {
+                                model.startGuide(name: w.name, lat: w.lat, lon: w.lon)
+                            } label: {
+                                Image(systemName: "safari")
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                            .buttonStyle(.borderless)
                         }
                     }
                     .onDelete { offsets in
