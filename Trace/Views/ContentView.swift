@@ -252,6 +252,7 @@ struct ContentView: View {
                     case "sequence": SequenceView()
                     case "history": HistoryView()
                     case "weather": WeatherNowView()
+                    case "place": PlaceSearchView()
                     default: EmptyView()
                     }
                 }
@@ -310,6 +311,8 @@ struct ContentView: View {
         .onOpenURL { url in
             handleIncoming(url: url)
         }
+        // récupération anti-crash : une sortie interrompue traîne ?
+        .onAppear { recoverAutosaveIfNeeded() }
         // le suivi et l'enregistrement consomment chaque fix GPS
         .onReceive(model.location.$fix) { fix in
             guard let fix else { return }
@@ -349,6 +352,18 @@ struct ContentView: View {
             flash("Impossible d'enregistrer la sortie")
         }
         recordedPoints = []
+    }
+
+    /// Si l'app s'est arrêtée en plein enregistrement, le brouillon
+    /// autosauvegardé est restauré comme trace « Sortie récupérée ».
+    private func recoverAutosaveIfNeeded() {
+        guard model.recording == nil,
+              let data = try? Data(contentsOf: GPXStore.autosaveURL),
+              let parsed = GPXParser.parse(data: data, fallbackName: "Sortie récupérée"),
+              parsed.points.count >= 2 else { return }
+        importParsed(parsed, data: data)
+        try? FileManager.default.removeItem(at: GPXStore.autosaveURL)
+        flash("Sortie interrompue récupérée ✓")
     }
 
     private func saveBuilder() {
@@ -619,7 +634,9 @@ struct RecordingHUDView: View {
                     .fill(.red)
                     .frame(width: 10, height: 10)
                     .opacity(rec.isPaused ? 0.3 : 1)
-                Text(rec.isPaused ? "En pause" : "Enregistrement")
+                Text(rec.isPaused ? "En pause"
+                     : rec.isAutoPaused ? "Pause auto (immobile)"
+                     : "Enregistrement")
                     .font(.headline)
                 Spacer()
                 GPSBadge(location: location)

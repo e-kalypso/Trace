@@ -38,6 +38,35 @@ struct HistoryView: View {
     private var totalUp: Double { logs.reduce(0) { $0 + $1.ascent } }
     private var totalTime: TimeInterval { logs.reduce(0) { $0 + $1.duration } }
 
+    private var yearLogs: [HikeLogRecord] {
+        let y = Calendar.current.component(.year, from: Date())
+        return logs.filter { Calendar.current.component(.year, from: $0.date) == y }
+    }
+    private var yearKm: Double { yearLogs.reduce(0) { $0 + $1.distance } / 1000 }
+    private var yearUp: Double { yearLogs.reduce(0) { $0 + $1.ascent } }
+
+    private struct Badge: Identifiable {
+        let id: String
+        let symbol: String
+        let label: String
+        let earned: Bool
+    }
+
+    private var badges: [Badge] {
+        let km = totalKm / 1000
+        return [
+            Badge(id: "b1", symbol: "figure.walk", label: "Première sortie", earned: logs.count >= 1),
+            Badge(id: "b2", symbol: "shoeprints.fill", label: "10 sorties", earned: logs.count >= 10),
+            Badge(id: "b3", symbol: "flame.fill", label: "50 sorties", earned: logs.count >= 50),
+            Badge(id: "b4", symbol: "star.fill", label: "100 km", earned: km >= 100),
+            Badge(id: "b5", symbol: "map.fill", label: "500 km", earned: km >= 500),
+            Badge(id: "b6", symbol: "mountain.2.fill", label: "5 000 m D+", earned: totalUp >= 5000),
+            Badge(id: "b7", symbol: "crown.fill", label: "Everest (8 849 m D+)", earned: totalUp >= 8849),
+            Badge(id: "b8", symbol: "moon.stars.fill", label: "Grande sortie (20 km+)",
+                  earned: logs.contains { $0.distance >= 20000 }),
+        ]
+    }
+
     var body: some View {
         List {
             Section {
@@ -50,6 +79,39 @@ struct HistoryView: View {
                 .padding(.vertical, 4)
             } header: {
                 Text("Depuis le début")
+            }
+
+            Section {
+                goal("Kilomètres", yearKm, model.goalKm, unit: "km")
+                goal("Dénivelé positif", yearUp, model.goalUp, unit: "m")
+            } header: {
+                Text("Objectifs \(String(Calendar.current.component(.year, from: Date())))")
+            } footer: {
+                Text("Objectifs réglables dans Réglages.")
+            }
+
+            Section("Badges") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 12) {
+                    ForEach(badges) { b in
+                        VStack(spacing: 4) {
+                            Image(systemName: b.symbol)
+                                .font(.title2)
+                                .foregroundStyle(b.earned ? Color.accentColor : .secondary)
+                            Text(b.label)
+                                .font(.caption2)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(
+                            b.earned ? Color.accentColor.opacity(0.12)
+                                     : Color.secondary.opacity(0.06),
+                            in: RoundedRectangle(cornerRadius: 10))
+                        .opacity(b.earned ? 1 : 0.5)
+                    }
+                }
+                .padding(.vertical, 4)
             }
 
             Section {
@@ -82,6 +144,22 @@ struct HistoryView: View {
         }
         .navigationTitle("Carnet")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func goal(_ label: String, _ value: Double, _ target: Double,
+                      unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label).font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(Int(value)) / \(Int(target)) \(unit)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            ProgressView(value: min(1, value / max(1, target)))
+                .tint(value >= target ? .green : Color.accentColor)
+        }
+        .padding(.vertical, 2)
     }
 
     private func total(_ value: String, _ label: String) -> some View {

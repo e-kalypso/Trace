@@ -106,6 +106,17 @@ final class AppModel: ObservableObject {
     }
     /// Pendant un suivi : caméra libérée pour voir toute la trace.
     @Published var followOverview = false
+    /// Rythme de marche : multiplie la durée DIN 33466 (0.8 rapide … 1.3 tranquille).
+    @Published var paceFactor: Double {
+        didSet { UserDefaults.standard.set(paceFactor, forKey: "paceFactor") }
+    }
+    /// Objectifs annuels du carnet.
+    @Published var goalKm: Double {
+        didSet { UserDefaults.standard.set(goalKm, forKey: "goalKm") }
+    }
+    @Published var goalUp: Double {
+        didSet { UserDefaults.standard.set(goalUp, forKey: "goalUp") }
+    }
 
     init() {
         basemap = Basemap(rawValue: UserDefaults.standard.string(forKey: "basemap") ?? "")
@@ -114,6 +125,12 @@ final class AppModel: ObservableObject {
         nightMode = UserDefaults.standard.bool(forKey: "nightMode")
         let w = UserDefaults.standard.double(forKey: "weightKg")
         weightKg = w > 0 ? w : 70
+        let pf = UserDefaults.standard.double(forKey: "paceFactor")
+        paceFactor = pf > 0 ? pf : 1.0
+        let gk = UserDefaults.standard.double(forKey: "goalKm")
+        goalKm = gk > 0 ? gk : 200
+        let gu = UserDefaults.standard.double(forKey: "goalUp")
+        goalUp = gu > 0 ? gu : 10000
     }
 
     /// Cache uuid → trace parsée (le fichier .gpx reste la source de vérité).

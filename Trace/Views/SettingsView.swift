@@ -58,6 +58,21 @@ struct SettingsView: View {
                     Label("Poids : \(Int(model.weightKg)) kg (calories)",
                           systemImage: "figure.walk")
                 }
+                Picker(selection: $model.paceFactor) {
+                    Text("Rapide").tag(0.8)
+                    Text("Normal").tag(1.0)
+                    Text("Tranquille").tag(1.3)
+                } label: {
+                    Label("Rythme de marche", systemImage: "speedometer")
+                }
+                Stepper(value: $model.goalKm, in: 50...2000, step: 50) {
+                    Label("Objectif annuel : \(Int(model.goalKm)) km",
+                          systemImage: "target")
+                }
+                Stepper(value: $model.goalUp, in: 1000...100000, step: 1000) {
+                    Label("Objectif D+ : \(Int(model.goalUp)) m",
+                          systemImage: "arrow.up.right")
+                }
             } header: {
                 Text("GPS et affichage")
             } footer: {

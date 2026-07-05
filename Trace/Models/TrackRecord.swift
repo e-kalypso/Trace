@@ -66,4 +66,9 @@ enum GPXStore {
     static func delete(for uuid: UUID) {
         try? FileManager.default.removeItem(at: url(for: uuid))
     }
+
+    /// Sauvegarde de secours de l'enregistrement en cours (anti-crash).
+    static var autosaveURL: URL {
+        directory.appendingPathComponent("autosave.gpx")
+    }
 }

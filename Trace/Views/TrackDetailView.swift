@@ -14,6 +14,8 @@ struct TrackDetailView: View {
 
     let record: TrackRecord
 
+    @State private var busyNetwork = false
+    @State private var netToast: String?
     @State private var showRename = false
     @State private var newName = ""
     @State private var confirmDelete = false
@@ -70,6 +72,36 @@ struct TrackDetailView: View {
                     ShareLink(item: GPXStore.url(for: record.uuid)) {
                         Label("Partager le fichier GPX", systemImage: "square.and.arrow.up")
                     }
+                    NavigationLink {
+                        CompareView(record: record)
+                    } label: {
+                        Label("Comparer avec une autre trace", systemImage: "square.split.2x1")
+                    }
+                    if t.stats.maxEle == nil {
+                        Button {
+                            addElevation()
+                        } label: {
+                            if busyNetwork {
+                                HStack { ProgressView(); Text("Altitude en cours…") }
+                            } else {
+                                Label("Ajouter l'altitude (en ligne)", systemImage: "arrow.up.forward.square")
+                            }
+                        }
+                        .disabled(busyNetwork)
+                    }
+                    Button {
+                        findPOIs()
+                    } label: {
+                        if busyNetwork {
+                            HStack { ProgressView(); Text("Recherche en cours…") }
+                        } else {
+                            Label("Eau & refuges sur l'itinéraire", systemImage: "drop.fill")
+                        }
+                    }
+                    .disabled(busyNetwork)
+                    if let netToast {
+                        Text(netToast).font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Couleur") {
@@ -99,6 +131,11 @@ struct TrackDetailView: View {
                         apply { TrackGeometry.reversed($0) }
                     } label: {
                         Label("Inverser le sens", systemImage: "arrow.left.arrow.right")
+                    }
+                    Button {
+                        apply { TrackGeometry.cleaned($0) }
+                    } label: {
+                        Label("Nettoyer les points aberrants", systemImage: "sparkles")
                     }
                     NavigationLink {
                         CutView(record: record)
@@ -192,7 +229,13 @@ struct TrackDetailView: View {
             HStack {
                 stat("Alt. min", Fmt.elevation(s.minEle))
                 stat("Alt. max", Fmt.elevation(s.maxEle))
-                stat("Durée est.", Fmt.duration(s.estimatedDuration))
+                stat("Durée est.", Fmt.duration(s.estimatedDuration * model.paceFactor))
+            }
+            HStack {
+                stat("Km-effort", String(format: "%.1f", s.distance / 1000 + s.ascent / 100))
+                stat("Énergie", Fmt.kcal(weightKg: model.weightKg,
+                                          distanceM: s.distance, ascent: s.ascent))
+                stat("Points", "\(s.pointCount)")
             }
         }
     }
@@ -206,6 +249,44 @@ struct TrackDetailView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: réseau
+
+    private func addElevation() {
+        guard let t = parsed else { return }
+        busyNetwork = true
+        Task { @MainActor in
+            if let filled = await ElevationService.fillElevation(t.points) {
+                rewrite(points: filled, waypoints: t.waypoints)
+                netToast = "Altitude ajoutée ✓ (D+ recalculé)"
+            } else {
+                netToast = "Altitude indisponible (hors ligne ?)"
+            }
+            busyNetwork = false
+        }
+    }
+
+    private func findPOIs() {
+        guard let t = parsed else { return }
+        busyNetwork = true
+        Task { @MainActor in
+            do {
+                let pois = try await POIFinder.findAlong(points: t.points)
+                for poi in pois {
+                    context.insert(WaypointRecord(
+                        name: poi.name, category: poi.category,
+                        lat: poi.lat, lon: poi.lon, ele: nil))
+                }
+                netToast = pois.isEmpty
+                    ? "Aucun point d'eau ni refuge trouvé le long de la trace"
+                    : "\(pois.count) repère(s) ajouté(s) : eau et refuges ✓"
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            } catch {
+                netToast = "Recherche indisponible (hors ligne ?)"
+            }
+            busyNetwork = false
+        }
     }
 
     // MARK: éditions

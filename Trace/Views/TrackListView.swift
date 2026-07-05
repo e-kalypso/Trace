@@ -6,7 +6,7 @@ import SwiftData
 import SwiftUI
 
 enum TrackSort: String, CaseIterable, Identifiable {
-    case manual, name, recent, distance, ascent
+    case manual, name, recent, distance, ascent, near
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -15,6 +15,7 @@ enum TrackSort: String, CaseIterable, Identifiable {
         case .recent: return "Plus récentes"
         case .distance: return "Distance"
         case .ascent: return "Dénivelé"
+        case .near: return "Près de moi"
         }
     }
 }
@@ -42,6 +43,16 @@ struct TrackListView: View {
         case .recent: list.sort { $0.createdAt > $1.createdAt }
         case .distance: list.sort { $0.distance > $1.distance }
         case .ascent: list.sort { $0.ascent > $1.ascent }
+        case .near:
+            if let fix = model.location.fix {
+                func d(_ r: TrackRecord) -> Double {
+                    guard let start = model.track(for: r)?.points.first else { return 1e12 }
+                    return TrackGeometry.haversine(
+                        fix.coordinate.latitude, fix.coordinate.longitude,
+                        start.lat, start.lon)
+                }
+                list.sort { d($0) < d($1) }
+            }
         }
         return list
     }
@@ -60,6 +71,9 @@ struct TrackListView: View {
                 }
                 NavigationLink(value: "weather") {
                     Label("Météo ici (12 h)", systemImage: "cloud.sun.fill")
+                }
+                NavigationLink(value: "place") {
+                    Label("Aller à un lieu", systemImage: "magnifyingglass.circle.fill")
                 }
             }
 

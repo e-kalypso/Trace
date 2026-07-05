@@ -121,6 +121,20 @@ enum TrackGeometry {
         return out
     }
 
+    /// Retire les sauts GPS aberrants (> 150 m d'un point au suivant).
+    static func cleaned(_ pts: [TrackPoint]) -> [TrackPoint] {
+        guard pts.count > 2 else { return pts }
+        var out: [TrackPoint] = [pts[0]]
+        for p in pts.dropFirst() {
+            let last = out[out.count - 1]
+            if haversine(last.lat, last.lon, p.lat, p.lon) <= 150 {
+                out.append(p)
+            }
+        }
+        accumulateDistances(&out)
+        return out
+    }
+
     static func reversed(_ pts: [TrackPoint]) -> [TrackPoint] {
         var out = Array(pts.reversed())
         for i in out.indices { out[i].time = nil }   // les horaires n'ont plus de sens
