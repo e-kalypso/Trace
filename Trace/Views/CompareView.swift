@@ -40,7 +40,7 @@ struct CompareView: View {
             if let other,
                let a = model.track(for: record),
                let b = model.track(for: other) {
-                Section("Face à face") {
+                Section {
                     row("Distance", Fmt.distance(a.stats.distance), Fmt.distance(b.stats.distance))
                     row("D+", "+\(Int(a.stats.ascent)) m", "+\(Int(b.stats.ascent)) m")
                     row("D-", "−\(Int(a.stats.descent)) m", "−\(Int(b.stats.descent)) m")
