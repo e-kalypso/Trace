@@ -106,7 +106,8 @@ struct ElevationChartView: View {
                             .gesture(
                                 DragGesture(minimumDistance: 0)
                                     .onChanged { value in
-                                        let origin = geo[proxy.plotAreaFrame].origin
+                                        guard let plotAnchor = proxy.plotFrame else { return }
+                                        let origin = geo[plotAnchor].origin
                                         let x = value.location.x - origin.x
                                         guard let km: Double = proxy.value(atX: x) else { return }
                                         if let nearest = data.min(by: {

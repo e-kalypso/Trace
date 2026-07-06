@@ -48,6 +48,8 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false
+        # les GPX entrants sont copiés dans l'app (flux onOpenURL)
+        LSSupportsOpeningDocumentsInPlace: false
         NSLocationWhenInUseUsageDescription: >-
           Trace utilise votre position pour l'afficher sur la carte et vous
           guider le long de vos itinéraires de randonnée.
